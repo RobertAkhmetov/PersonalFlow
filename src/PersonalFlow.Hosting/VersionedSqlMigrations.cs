@@ -42,7 +42,10 @@ public static class VersionedSqlMigrations
                 continue;
             }
             await db.Database.ExecuteSqlRawAsync(migration.Sql, cancellationToken);
-            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"{HistoryTable}\" (\"Version\", \"Checksum\") VALUES ({migration.Id}, {checksum})", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(
+                $"INSERT INTO \"{HistoryTable}\" (\"Version\", \"Checksum\") VALUES ({{0}}, {{1}})",
+                new object?[] { migration.Id, checksum },
+                cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
     }
