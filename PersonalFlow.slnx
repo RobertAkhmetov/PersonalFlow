@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PersonalFlow.Core/PersonalFlow.Core.csproj" />
+    <Project Path="src/PersonalFlow.Hosting/PersonalFlow.Hosting.csproj" />
+    <Project Path="src/PersonalFlow.Identity.Api/PersonalFlow.Identity.Api.csproj" />
+    <Project Path="src/PersonalFlow.Learning.Api/PersonalFlow.Learning.Api.csproj" />
+    <Project Path="src/PersonalFlow.Life.Api/PersonalFlow.Life.Api.csproj" />
+    <Project Path="src/PersonalFlow.Client/PersonalFlow.Client.csproj" />
+    <Project Path="src/PersonalFlow.Desktop/PersonalFlow.Desktop.csproj" />
+  </Folder>
+</Solution>

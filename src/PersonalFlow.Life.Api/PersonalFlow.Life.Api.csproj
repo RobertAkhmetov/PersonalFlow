@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+<PropertyGroup><TargetFramework>net11.0</TargetFramework></PropertyGroup>
+<ItemGroup>
+<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0"/><PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0"/>  <ProjectReference Include="../PersonalFlow.Hosting/PersonalFlow.Hosting.csproj" />
+  <EmbeddedResource Include="Migrations/*.sql" />
+</ItemGroup>
+</Project>

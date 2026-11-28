@@ -1,0 +1,338 @@
+x-default-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+name: personalflow
+services:
+  postgres:
+    logging: *default-logging
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: personalflow_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-admin-password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - "max_connections=${PG_MAX_CONNECTIONS:-60}"
+      - -c
+      - "shared_buffers=${PG_SHARED_BUFFERS:-128MB}"
+    secrets:
+      - source: postgres_admin_password
+        target: postgres-admin-password
+      - source: life_runtime_password
+        target: life-runtime-password
+      - source: life_migrator_password
+        target: life-migrator-password
+      - source: learning_runtime_password
+        target: learning-runtime-password
+      - source: learning_migrator_password
+        target: learning-migrator-password
+      - source: identity_runtime_password
+        target: identity-runtime-password
+      - source: identity_migrator_password
+        target: identity-migrator-password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init-databases.sh:/docker-entrypoint-initdb.d/01-databases.sh:ro
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U personalflow_admin -d postgres]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-512m}
+    cpus: ${POSTGRES_CPUS:-1.0}
+    security_opt: [no-new-privileges:true]
+
+  identity-migrate:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-identity:${IMAGE_TAG:-latest}
+    environment: &identity_environment
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Signing__Certificate: /run/secrets/signing.pfx
+      Signing__PasswordFile: /run/secrets/signing-password
+      DataProtection__Path: /var/lib/personalflow/data-protection
+      Identity__Authority: https://${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN}/
+      Proxy__Address: ${PROXY_ADDRESS:-172.30.19.10}
+    secrets:
+      - source: identity_migrator_connection
+        target: database-connection
+      - source: signing_certificate
+        target: signing.pfx
+      - source: signing_password
+        target: signing-password
+    volumes:
+      - identity_data_protection:/var/lib/personalflow/data-protection
+    command: [--migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [data]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${MIGRATION_MEMORY_LIMIT:-320m}
+    cpus: ${MIGRATION_CPUS:-0.75}
+
+  identity:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-identity:${IMAGE_TAG:-latest}
+    environment:
+      <<: *identity_environment
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+    secrets:
+      - source: identity_runtime_connection
+        target: database-connection
+      - source: signing_certificate
+        target: signing.pfx
+      - source: signing_password
+        target: signing-password
+    volumes:
+      - identity_data_protection:/var/lib/personalflow/data-protection
+    depends_on:
+      identity-migrate: {condition: service_completed_successfully}
+    networks: [default, data]
+    healthcheck: &api_healthcheck
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8080/health/ready]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${IDENTITY_MEMORY_LIMIT:-320m}
+    cpus: ${IDENTITY_CPUS:-0.75}
+
+  identity-bootstrap:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-identity:${IMAGE_TAG:-latest}
+    profiles: [bootstrap]
+    environment:
+      <<: *identity_environment
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Owner__Name: ${OWNER_NAME:-personalflow-owner}
+      Owner__Id: ${OWNER_ID:?set OWNER_ID in production.env}
+      Owner__PasswordFile: /run/secrets/owner-password
+    secrets:
+      - source: identity_migrator_connection
+        target: database-connection
+      - source: signing_certificate
+        target: signing.pfx
+      - source: signing_password
+        target: signing-password
+      - source: owner_password
+        target: owner-password
+    volumes:
+      - identity_data_protection:/var/lib/personalflow/data-protection
+    command: [--provision-owner]
+    depends_on:
+      identity-migrate: {condition: service_completed_successfully}
+    networks: [data]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${MIGRATION_MEMORY_LIMIT:-320m}
+    cpus: ${MIGRATION_CPUS:-0.75}
+
+  life-migrate:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-life:${IMAGE_TAG:-latest}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Identity__Authority: https://${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN}/
+      Identity__OwnerId: ${OWNER_ID:?set OWNER_ID in production.env}
+      Proxy__Address: ${PROXY_ADDRESS:-172.30.19.10}
+    secrets:
+      - source: life_migrator_connection
+        target: database-connection
+    command: [--migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+      identity-migrate: {condition: service_completed_successfully}
+    networks: [data]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${MIGRATION_MEMORY_LIMIT:-320m}
+    cpus: ${MIGRATION_CPUS:-0.75}
+
+  life:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-life:${IMAGE_TAG:-latest}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Identity__Authority: https://${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN}/
+      Identity__OwnerId: ${OWNER_ID:?set OWNER_ID in production.env}
+      Proxy__Address: ${PROXY_ADDRESS:-172.30.19.10}
+    secrets:
+      - source: life_runtime_connection
+        target: database-connection
+    depends_on:
+      life-migrate: {condition: service_completed_successfully}
+      identity: {condition: service_healthy}
+    networks: [default, data]
+    healthcheck: *api_healthcheck
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${LIFE_MEMORY_LIMIT:-192m}
+    cpus: ${LIFE_CPUS:-0.75}
+
+  learning-migrate:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-learning:${IMAGE_TAG:-latest}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Identity__Authority: https://${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN}/
+      Identity__OwnerId: ${OWNER_ID:?set OWNER_ID in production.env}
+      Publishing__ApiKeyFile: /run/secrets/publisher-key
+      Proxy__Address: ${PROXY_ADDRESS:-172.30.19.10}
+    secrets:
+      - source: learning_migrator_connection
+        target: database-connection
+      - source: learning_publisher_key
+        target: publisher-key
+    command: [--migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+      life-migrate: {condition: service_completed_successfully}
+    networks: [data]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${MIGRATION_MEMORY_LIMIT:-320m}
+    cpus: ${MIGRATION_CPUS:-0.75}
+
+  learning:
+    logging: *default-logging
+    image: ghcr.io/${GHCR_NAMESPACE:?set GHCR_NAMESPACE}/personalflow-learning:${IMAGE_TAG:-latest}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DatabaseFile: /run/secrets/database-connection
+      Identity__Authority: https://${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN}/
+      Identity__OwnerId: ${OWNER_ID:?set OWNER_ID in production.env}
+      Publishing__ApiKeyFile: /run/secrets/publisher-key
+      Proxy__Address: ${PROXY_ADDRESS:-172.30.19.10}
+    secrets:
+      - source: learning_runtime_connection
+        target: database-connection
+      - source: learning_publisher_key
+        target: publisher-key
+    depends_on:
+      learning-migrate: {condition: service_completed_successfully}
+      identity: {condition: service_healthy}
+    networks: [default, data]
+    healthcheck: *api_healthcheck
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /run/personalflow-secrets]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${LEARNING_MEMORY_LIMIT:-224m}
+    cpus: ${LEARNING_CPUS:-0.75}
+
+  caddy:
+    logging: *default-logging
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in production.env}
+      IDENTITY_DOMAIN: ${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN in production.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in production.env}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../local-private/caddy-sites:/etc/caddy/sites:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      identity: {condition: service_healthy}
+      life: {condition: service_healthy}
+      learning: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:2019/config/]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${CADDY_MEMORY_LIMIT:-96m}
+    cpus: ${CADDY_CPUS:-0.25}
+    networks:
+      default:
+        ipv4_address: ${PROXY_ADDRESS:-172.30.19.10}
+      edge:
+        aliases: [personalflow-edge]
+
+secrets:
+  postgres_admin_password: {file: ../local-private/production-secrets/postgres-admin-password}
+  life_runtime_password: {file: ../local-private/production-secrets/life-runtime-password}
+  life_migrator_password: {file: ../local-private/production-secrets/life-migrator-password}
+  learning_runtime_password: {file: ../local-private/production-secrets/learning-runtime-password}
+  learning_migrator_password: {file: ../local-private/production-secrets/learning-migrator-password}
+  identity_runtime_password: {file: ../local-private/production-secrets/identity-runtime-password}
+  identity_migrator_password: {file: ../local-private/production-secrets/identity-migrator-password}
+  identity_runtime_connection: {file: ../local-private/production-secrets/identity-runtime-connection}
+  identity_migrator_connection: {file: ../local-private/production-secrets/identity-migrator-connection}
+  life_runtime_connection: {file: ../local-private/production-secrets/life-runtime-connection}
+  life_migrator_connection: {file: ../local-private/production-secrets/life-migrator-connection}
+  learning_runtime_connection: {file: ../local-private/production-secrets/learning-runtime-connection}
+  learning_migrator_connection: {file: ../local-private/production-secrets/learning-migrator-connection}
+  signing_certificate: {file: ../local-private/production-secrets/signing.pfx}
+  signing_password: {file: ../local-private/production-secrets/signing-password}
+  learning_publisher_key: {file: ../local-private/production-secrets/learning-publisher-key}
+  owner_password: {file: ../local-private/production-secrets/owner-password}
+
+volumes:
+  postgres_data:
+    name: personalflow_postgres_data
+  caddy_data:
+  caddy_config:
+  identity_data_protection:
+
+networks:
+  default:
+    name: personalflow_default
+    ipam:
+      config:
+        - subnet: ${PRIVATE_SUBNET:-172.30.19.0/24}
+  data:
+    name: personalflow_data
+    internal: true
+  edge:
+    name: personalflow_edge

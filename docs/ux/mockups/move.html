@@ -1,0 +1,23 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PersonalFlow · Перенос задачи</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f6ef;color:#182b24;font:16px/1.5 system-ui}main{max-width:780px;margin:6vh auto;padding:24px}header,footer,.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}header{justify-content:space-between}small{color:#4a6156}h1{font-size:clamp(26px,5vw,42px);letter-spacing:-.04em;margin:36px 0 10px}article,aside{padding:24px;border:1px solid #cad6c9;border-radius:14px;background:white;margin:16px 0}h2{margin:0}button,input{font:inherit;padding:10px 14px;border:1px solid #839a8b;border-radius:8px;background:white;color:inherit;min-height:44px}button{cursor:pointer}button.primary{background:#24563d;color:white}button:focus-visible,input:focus-visible{outline:3px solid #b87811}dialog{max-width:min(92vw,440px);border:1px solid #839a8b;border-radius:12px;padding:24px}dialog::backdrop{background:#182b2466}footer{margin-top:32px;border-top:1px solid #cad6c9;padding-top:16px}[hidden]{display:none!important}
+</style><main><header><strong>PersonalFlow</strong><small>Интерактивный эскиз · вымышленные данные</small></header><h1>План на день</h1><article><small id="day"></small><h2>Прогулка</h2><p>18:00 · Одно вхождение</p><button class="primary" id="move">Перенести</button></article>
+<div role="status" id="status"></div><button hidden id="undo">Отменить перенос</button>
+<aside hidden id="conflict"><h2>На какую дату оставить прогулку?</h2><p id="base"></p><div class="actions"><button id="phone"></button><button id="pc"></button><button id="other">Выбрать другую дату</button></div></aside>
+<footer><small>Сценарии макета</small><button id="simulate">Смоделировать правки на двух устройствах</button><button id="reset">Начать заново</button></footer>
+<dialog id="picker"><form id="form"><h2>Перенести прогулку</h2><p><label>Новая дата <input required type="date" id="date"></label></p><div class="actions"><button class="primary">Сохранить</button><button type="button" id="cancel">Назад</button></div></form></dialog></main>
+<script>
+const el=id=>document.getElementById(id);
+const label=d=>new Intl.DateTimeFormat('ru',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(d+'T12:00:00Z'));
+let current,previous,remote;
+function render(message){el('day').textContent=label(current);el('status').textContent=message;el('undo').hidden=!previous||!!remote;el('conflict').hidden=!remote;el('move').disabled=!!remote;el('simulate').disabled=!!remote}
+function reset(){current='2026-11-20';previous=null;remote=null;render('')}
+function picker(){el('date').value=current;el('picker').showModal()}
+function resolve(day){current=day;remote=null;previous=null;render('Выбор сохранён. Обе версии учтены.')}
+el('move').onclick=el('other').onclick=picker;
+el('cancel').onclick=()=>el('picker').close();
+el('form').onsubmit=e=>{e.preventDefault();const day=el('date').value;el('picker').close();if(remote){resolve(day);return}if(day===current)return;previous=current;current=day;render('Сохранено на устройстве · ожидает синхронизации')};
+el('undo').onclick=()=>{current=previous;previous=null;render('Перенос отменён · ожидает синхронизации')};
+el('simulate').onclick=()=>{const base=current;current=base==='2026-11-21'?'2026-11-23':'2026-11-21';remote=base==='2026-11-22'?'2026-11-24':'2026-11-22';el('base').textContent='До правок · '+label(base);el('phone').textContent='Телефон · '+label(current);el('pc').textContent='ПК · '+label(remote);render('На устройствах выбраны разные даты')};
+el('phone').onclick=()=>resolve(current);el('pc').onclick=()=>resolve(remote);el('reset').onclick=reset;reset();
+</script></html>

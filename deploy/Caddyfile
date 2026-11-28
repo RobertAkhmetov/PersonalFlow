@@ -1,0 +1,26 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$IDENTITY_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy identity:8080
+}
+
+{$APP_DOMAIN} {
+    encode zstd gzip
+    handle_path /life/* {
+        reverse_proxy life:8080
+    }
+    handle_path /learning/* {
+        reverse_proxy learning:8080
+    }
+    handle {
+        respond 404
+    }
+}
+
+# This host-level Caddy instance is the single HTTP/HTTPS entry point. Other
+# Compose projects can attach their public services to personalflow_edge and
+# add their site blocks in local-private/caddy-sites/ without editing this file.
+import /etc/caddy/sites/*.caddy

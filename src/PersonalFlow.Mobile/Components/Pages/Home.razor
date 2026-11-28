@@ -1,0 +1,2178 @@
+@page "/"
+@using System.Globalization
+@using System.Text.Json.Nodes
+@using PersonalFlow.Client
+@using PersonalFlow.Core
+@using PersonalFlow.Mobile.Reminders
+@implements IDisposable
+@inject LocalStore Store
+@inject ReminderCoordinator Reminders
+@inject PrivateSeedImporter PrivateSeed
+@inject MobileIdentitySession Identity
+@inject MobileSyncCoordinator Synchronizer
+@inject MobileBackgroundSync BackgroundSync
+
+<div class="app-shell">
+    <header class="app-header">
+        <a class="brand" href="" aria-label="PersonalFlow — главная">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 48 48" fill="none">
+                    <path d="M7 14c7-7 13-7 20 0s13 7 20 0M7 24c7-7 13-7 20 0s13 7 20 0M7 34c7-7 13-7 20 0s13 7 20 0" />
+                    <circle cx="41" cy="9" r="3" />
+                </svg>
+            </span>
+            <span class="brand-name">personal<span>flow</span></span>
+        </a>
+        <div class="header-actions">
+            <span class="local-status"><span class="status-dot"></span>@(authSignedIn ? "Аккаунт подключён" : "На устройстве")</span>
+            <button class="icon-button" @onclick='() => Navigate("settings")' aria-label="Открыть настройки" title="Настройки">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>
+            </button>
+        </div>
+    </header>
+
+    <main id="main-content" class="main-content">
+        @if (tab == "plan")
+        {
+            <section class="screen-heading">
+                <div>
+                    <p class="eyebrow">МОСКОВСКОЕ ВРЕМЯ</p>
+                    <h1>Планы</h1>
+                    <p class="screen-subtitle">Ваш ритм на каждый день.</p>
+                </div>
+                <button class="today-button" @onclick="GoToday">Сегодня</button>
+            </section>
+
+            <div class="plan-shortcuts">
+                <button class="secondary-button" @onclick="OpenRecurrenceManager">Повторы <span>@recurrences.Count</span></button>
+                <button class="secondary-button" @onclick="OpenVacationManager">Отпуска и исключения <span>@vacations.Count</span></button>
+            </div>
+
+            <div class="calendar-toolbar">
+                <div class="segmented-control" role="group" aria-label="Вид календаря">
+                    <button class="@(monthView ? "" : "selected")" @onclick="() => monthView = false" aria-pressed="@(!monthView)">Неделя</button>
+                    <button class="@(monthView ? "selected" : "")" @onclick="() => monthView = true" aria-pressed="@monthView">Месяц</button>
+                </div>
+                <div class="period-controls">
+                    <button class="icon-button small" @onclick="() => ShiftPeriod(-1)" aria-label="Предыдущий @(monthView ? "месяц" : "неделя")">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                    </button>
+                    <strong class="period-title">@selectedDate.ToString("MMMM yyyy", culture)</strong>
+                    <button class="icon-button small" @onclick="() => ShiftPeriod(1)" aria-label="Следующий @(monthView ? "месяц" : "неделя")">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                    </button>
+                </div>
+            </div>
+
+            @if (!monthView)
+            {
+                <div class="week-strip" aria-label="Дни недели">
+                    @foreach (var date in WeekDays())
+                    {
+                        var count = CountTasksOn(date);
+                        var leave = VacationsOn(date);
+                        <button class="week-day @(date == selectedDate ? "selected" : "") @(date == LocalStore.Today ? "is-today" : "") @(leave.Count > 0 ? "has-vacation" : "")" @onclick="() => SelectDate(date)" aria-pressed="@(date == selectedDate)" aria-label="@CalendarDayLabel(date, count, leave)" title="@VacationTooltip(leave)">
+                            <span class="week-day-name">@date.ToString("ddd", culture)</span>
+                            <span class="week-day-number">@date.Day</span>
+                            <span class="week-day-footer">
+                                @if (count > 0) { <span class="week-day-count">@count</span> }
+                                @if (leave.Count > 0) { <i class="week-vacation-mark" aria-hidden="true"></i> }
+                                @if (count == 0 && leave.Count == 0) { <span class="week-day-spacer"></span> }
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="month-calendar" role="grid" aria-label="@selectedDate.ToString("MMMM yyyy", culture)">
+                    <div class="month-weekdays" role="row">
+                        @foreach (var day in weekdayHeaders) { <span role="columnheader">@day</span> }
+                    </div>
+                    <div class="month-days">
+                        @foreach (var date in MonthDays())
+                        {
+                            var count = CountTasksOn(date);
+                            var leave = VacationsOn(date);
+                            <button role="gridcell" class="month-day @(date.Month != selectedDate.Month ? "outside-month" : "") @(date == selectedDate ? "selected" : "") @(date == LocalStore.Today ? "is-today" : "") @(leave.Count > 0 ? "has-vacation" : "")" @onclick="() => SelectDate(date)" aria-pressed="@(date == selectedDate)" aria-label="@CalendarDayLabel(date, count, leave)" title="@VacationTooltip(leave)">
+                                <span>@date.Day</span>
+                                @if (count > 0 || leave.Count > 0)
+                                {
+                                    <span class="month-day-indicators" aria-hidden="true">
+                                        @if (count > 0) { <i class="month-day-mark"></i> }
+                                        @if (leave.Count > 0) { <i class="month-vacation-mark"></i> }
+                                    </span>
+                                }
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (VisibleCalendarVacations().Count > 0)
+            {
+                <div class="calendar-legend" aria-label="Обозначения календаря">@if (monthView) { <span><i class="legend-task-mark" aria-hidden="true"></i>Есть дела</span> }<span><i class="month-vacation-mark" aria-hidden="true"></i>Период отсутствия</span></div>
+            }
+
+            <section class="day-section" aria-labelledby="selected-day-title">
+                <div class="day-summary">
+                    <div>
+                        <p class="eyebrow">@(selectedDate == LocalStore.Today ? "СЕГОДНЯ" : "ВЫБРАННЫЙ ДЕНЬ")</p>
+                        <h2 id="selected-day-title" class="day-title">@selectedDate.ToString("dddd, d MMMM", culture)</h2>
+                    </div>
+                    @if (SelectedDayTasks.Count > 0)
+                    {
+                        <div class="day-progress" role="progressbar" aria-label="Выполнение дел" aria-valuemin="0" aria-valuemax="@SelectedDayTasks.Count" aria-valuenow="@SelectedDayTasks.Count(x => x.Done)">
+                            <span>@SelectedDayTasks.Count(x => x.Done) из @SelectedDayTasks.Count</span>
+                            <div class="progress-track"><span style="width:@ProgressPercent%"></span></div>
+                        </div>
+                    }
+                </div>
+
+                @if (VacationsOn(selectedDate) is { Count: > 0 } selectedLeave)
+                {
+                    <div class="selected-vacation-note"><span class="week-vacation-mark" aria-hidden="true"></span><div><strong>Период отсутствия</strong><span>@VacationTooltip(selectedLeave)</span></div></div>
+                }
+
+                @if (SelectedDayTasks.Count == 0)
+                {
+                    <div class="empty-state">
+                        <div class="empty-icon" aria-hidden="true">
+                            <svg viewBox="0 0 48 48"><path d="M14 8v8m20-8v8M9 19h30M12 12h24a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V15a3 3 0 0 1 3-3Z" /><path d="m18 29 4 4 9-10" /></svg>
+                        </div>
+                        <h3>Здесь пока свободно</h3>
+                        <p>Добавьте дело или оставьте день таким, как он есть.</p>
+                        <button class="secondary-button" @onclick="() => AddAt(selectedDate)">Добавить первое дело</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="task-list">
+                        @foreach (var item in SelectedDayTasks)
+                        {
+                            <article class="task-card @(item.Done ? "completed" : "")">
+                                <button class="task-check" @onclick="() => Toggle(item)" disabled="@(ScheduledLog(item)?.Finished == true)" aria-pressed="@item.Done" aria-label="@(item.Done ? "Отметить незавершённым" : "Отметить выполненным"): @item.Title">
+                                    @if (item.Done)
+                                    {
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
+                                    }
+                                </button>
+                                <div class="task-content">
+                                    <div class="task-meta">
+                                        @if (!string.IsNullOrWhiteSpace(item.Time))
+                                        {
+                                            <span class="time-label"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 1.5" /></svg>@FormatTaskTime(item.Time)</span>
+                                        }
+                                        else { <span class="all-day-label">Без времени</span> }
+                                        @if (item.Done) { <span class="done-label">Выполнено</span> }
+                                        @if (item.SeriesId is not null) { <span class="recurring-label">Повтор</span> }
+                                        @if (item.WorkoutDayId is not null) { <span class="recurring-label">Тренировка</span> }
+                                    </div>
+                                    <button class="task-title" @onclick="() => Edit(item)">@item.Title</button>
+                                    <div class="task-actions">
+                                        <button @onclick="() => OpenMove(item)">Перенести</button>
+                                        <button @onclick="() => Edit(item)">@(item.SeriesId is null ? "Изменить" : "Серия")</button>
+                                        @if (item.SeriesId is not null) { <button @onclick="() => SkipOccurrence(item)">Пропустить</button> }
+                                        @if (item.WorkoutDayId is not null) { <button class="primary-inline" @onclick="() => StartScheduled(item)">@(ScheduledLog(item) is { Finished: true } ? "Результат" : ScheduledLog(item) is null ? "Начать тренировку" : "Продолжить")</button> }
+                                    </div>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+                <button class="primary-button add-task-button" @onclick="() => AddAt(selectedDate)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                    Добавить дело
+                </button>
+            </section>
+        }
+        else if (tab == "notes")
+        {
+            <section class="screen-heading">
+                <div><p class="eyebrow">МЫСЛИ ПОД РУКОЙ</p><h1>Заметки</h1><p class="screen-subtitle">Тексты и идеи, которые хочется сохранить.</p></div>
+                <button class="round-action" @onclick="NewNote" aria-label="Новая заметка" title="Новая заметка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+            </section>
+            <label class="search-field">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4 4" /></svg>
+                <input aria-label="Поиск по заметкам" placeholder="Найти заметку" @bind="search" @bind:event="oninput" />
+                @if (!string.IsNullOrWhiteSpace(search)) { <button class="clear-search" @onclick='() => search = ""' aria-label="Очистить поиск">×</button> }
+            </label>
+            @if (!VisibleNotes.Any())
+            {
+                <div class="empty-state notes-empty">
+                    <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M13 8h17l7 7v25H13a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z" /><path d="M29 8v8h8M17 24h16M17 31h12" /></svg></div>
+                    <h3>@(string.IsNullOrWhiteSpace(search) ? "Сохраните то, что важно" : "Ничего не найдено")</h3>
+                    <p>@(string.IsNullOrWhiteSpace(search) ? "Идеи, ссылки и мысли останутся рядом даже без сети." : "Попробуйте другой запрос.")</p>
+                    @if (string.IsNullOrWhiteSpace(search)) { <button class="secondary-button" @onclick="NewNote">Создать заметку</button> }
+                </div>
+            }
+            else
+            {
+                @if (VisibleNotes.Any(x => x.Pinned)) { <h2 class="list-heading">Закреплённое</h2> }
+                <div class="notes-list">
+                    @foreach (var note in VisibleNotes)
+                    {
+                        <article class="note-card @(note.Pinned ? "pinned" : "")">
+                            <div class="note-meta">
+                                <span>@note.Created.ToLocalTime().ToString("d MMM yyyy · HH:mm", culture)</span>
+                                @if (note.Pinned) { <span class="pinned-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 3 6 0 1 5 3 3-5 1-2 5-2-5-5-1 3-3 1-5Z" /></svg>Закреплено</span> }
+                            </div>
+                            <p class="note-body">@note.Text</p>
+                            <div class="note-actions">
+                                <button @onclick="() => EditNote(note)">Изменить</button>
+                                <button @onclick="() => Pin(note)">@(note.Pinned ? "Открепить" : "Закрепить")</button>
+                                <button class="delete-action" @onclick="() => AskDeleteNote(note)">Удалить</button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        }
+        else if (tab == "learn")
+        {
+            <section class="screen-heading">
+                <div><p class="eyebrow">ОДИН ШАГ ГЛУБЖЕ</p><h1>Учёба</h1><p class="screen-subtitle">Короткая теория, которую можно применить.</p></div>
+            </section>
+            @if (availableLessons.Count > 0)
+            {
+                <div class="lesson-picker" role="group" aria-label="Уроки, сохранённые на устройстве">
+                    @foreach (var lesson in availableLessons)
+                    {
+                        <button class="lesson-option @(activeLesson?.Id == lesson.Id && activeLesson?.Version == lesson.Version ? "selected" : "")"
+                                aria-pressed="@(activeLesson?.Id == lesson.Id && activeLesson?.Version == lesson.Version)"
+                                @onclick="() => SelectLesson(lesson.Id, lesson.Version)">
+                            <span>@lesson.Date.ToString("ddd, d MMM", culture) · v@lesson.Version</span>
+                            <strong>@lesson.Title</strong>
+                            <small>@lesson.EstimatedMinutes минут</small>
+                        </button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="lesson-cache-empty">Опубликованные уроки появятся здесь после подключения синхронизации. Демонстрационный урок ниже доступен офлайн.</div>
+            }
+            <article class="lesson-card">
+                <div class="lesson-topline"><span class="lesson-chip">@(activeLesson is null ? "Демонстрационный урок" : "Опубликованный урок")</span><span class="lesson-duration"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 1.5" /></svg>@LessonDuration минут</span></div>
+                <h2>@LessonTitle</h2>
+                <p class="lesson-intro">@LessonIntro</p>
+                <div class="lesson-theory">
+                    <h3>Как это работает</h3>
+                    <div class="lesson-theory-text">@LessonTheory</div>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(activeLesson?.SelfCheck))
+                {
+                    <details class="rubric-details">
+                        <summary>Ориентиры для самопроверки</summary>
+                        <div class="lesson-theory-text">@activeLesson.SelfCheck</div>
+                    </details>
+                }
+                @foreach (var source in CurrentLessonSources)
+                {
+                    <button class="source-link" @onclick="() => OpenSource(source.Url)">
+                        <span class="source-mark">MS</span><span><small>@(source.Section ?? "Первоисточник · проверено " + source.VerifiedOn.ToString("d MMM yyyy", culture))</small><strong>@source.Title</strong></span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4h9v9M16 4 8 12M14 11v5H4V6h5" /></svg>
+                    </button>
+                }
+                <label class="lesson-read"><input type="checkbox" checked="@LessonRead" @onchange="ReadLesson" /><span class="custom-check"></span><span>Я прочитал теорию</span></label>
+            </article>
+
+            @if (LessonPractice is { Length: > 0 } practice)
+            {
+                <article class="practice-card">
+                    <div class="card-eyebrow">ПРОВЕРЬТЕ ПОНИМАНИЕ</div>
+                    <h2>Продумайте сценарий</h2>
+                    <p>@practice</p>
+                    <label class="field-label" for="lesson-answer">Ваше объяснение</label>
+                    <textarea id="lesson-answer" class="text-area" placeholder="Запишите ход мысли — черновик сохраняется автоматически." value="@answerDraft" @oninput="SaveAnswer" @onchange="CommitAnswer" aria-describedby="answer-help"></textarea>
+                    <div id="answer-help" class="field-hint">Можно вернуться позже. Ответ остаётся на устройстве.</div>
+                    <label class="field-label" for="lesson-evidence">Что теперь можете объяснить или применить?</label>
+                    <textarea id="lesson-evidence" class="text-area" placeholder="Коротко зафиксируйте свидетельство понимания." value="@evidenceDraft" @oninput="SaveEvidence" @onchange="CommitEvidence"></textarea>
+                    @if (activeLesson is null)
+                    {
+                        <details class="rubric-details">
+                            <summary>Ориентиры для самопроверки</summary>
+                            <ul><li>Токен проходит до I/O.</li><li>Отмена не маскируется под сетевой сбой.</li><li>Ресурсы освобождаются при любом исходе.</li></ul>
+                        </details>
+                    }
+                </article>
+            }
+            else if (IsTheoryOnly)
+            {
+                <div class="sunday-note"><span aria-hidden="true">☼</span><p>Воскресный урок — только теория, без обязательной практики.</p></div>
+            }
+
+            <article class="practice-card lesson-notes-card">
+                <div class="card-eyebrow">ДЛЯ СЕБЯ · НЕОБЯЗАТЕЛЬНО</div>
+                <h2>Заметки к уроку</h2>
+                <textarea id="lesson-notes" class="text-area" aria-label="Заметки к уроку" placeholder="Сохраните вопрос, пример или мысль — без обязательного задания." value="@notesDraft" @oninput="SaveNotes" @onchange="CommitNotes"></textarea>
+                <div class="field-hint">Заметки сохраняются на устройстве вместе с версией урока.</div>
+                <button class="secondary-button codex-button" @onclick="CopyLesson">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>
+                    Подготовить пакет для Codex
+                </button>
+            </article>
+
+            @if (shareText is not null)
+            {
+                <article class="share-card">
+                    <div class="card-eyebrow">ПАКЕТ ДЛЯ ОБСУЖДЕНИЯ</div><h2>Проверьте перед передачей</h2>
+                    <p>В пакет попадут урок, источник и ваш ответ. Измените текст, если хотите что-то убрать.</p>
+                    <textarea class="text-area share-area" aria-label="Текст пакета для Codex" @bind="shareText"></textarea>
+                    <div class="button-row"><button class="secondary-button" @onclick="CopyPackage">Копировать</button><button class="primary-button" @onclick="SharePackage">Поделиться</button></div>
+                </article>
+            }
+        }
+        else if (tab == "workouts")
+        {
+            <section class="screen-heading">
+                <div><p class="eyebrow">СИЛА В СВОЁМ РИТМЕ</p><h1>Тренировки</h1><p class="screen-subtitle">План, запись подходов и история занятий.</p></div>
+                <button class="round-action" @onclick="NewTrainingDay" aria-label="Добавить день программы" title="Добавить день программы"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+            </section>
+            <div class="workout-summary"><span class="summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8v8M3 10v4M18 8v8M21 10v4M6 12h12" /></svg></span><div><strong>@training.Count планов</strong><small>Занятия можно проходить в любом порядке</small></div></div>
+
+            @if (ActiveLogs.Any())
+            {
+                <h2 class="list-heading">Продолжить тренировку</h2>
+                @foreach (var log in ActiveLogs)
+                {
+                    var template = WorkoutDocuments.ReadPlan(log.DayId, log.Name, log.Snapshot);
+                    var recorded = WorkoutDocuments.ReadLog(log.Results);
+                    <article class="active-session">
+                        <div class="session-state"><span class="status-dot"></span>В процессе · @FormatMoscow(log.Started)</div>
+                        <h2>@log.Name</h2>
+                        @foreach (var exercise in template.Exercises)
+                        {
+                            <section class="session-exercise">
+                                <div class="session-exercise-heading"><h3>@exercise.Name</h3><span>@FormatTargets(exercise)</span></div>
+                                @if (!string.IsNullOrWhiteSpace(exercise.Note)) { <p class="exercise-note">@exercise.Note</p> }
+                                @for (var setIndex = 0; setIndex < exercise.Sets.Count; setIndex++)
+                                {
+                                    var target = exercise.Sets[setIndex];
+                                    var actual = recorded.Sets.FirstOrDefault(x => x.SetId == target.Id);
+                                    <div class="session-set">
+                                        <div class="session-set-target"><span>Подход @(setIndex + 1)</span><strong>@WorkoutDocuments.FormatTarget(target)</strong></div>
+                                        <label><span>Повторы</span><input type="number" min="0" max="1000" inputmode="numeric" value="@ResultRepetitions(actual)" @onchange="e => UpdateSessionSet(log, target, e, true)" /></label>
+                                        <label><span>Вес</span><input type="number" min="0" max="100000" step="0.1" inputmode="decimal" value="@ResultLoad(actual)" @onchange="e => UpdateSessionSet(log, target, e, false)" /></label>
+                                        <label class="set-complete"><input type="checkbox" checked="@(actual?.Completed ?? false)" @onchange="e => UpdateSessionCompleted(log, target, e)" /><span>Готово</span></label>
+                                    </div>
+                                }
+                            </section>
+                        }
+                        <label class="field-label" for="result-notes-@log.Id">Заметка по тренировке</label>
+                        <textarea id="result-notes-@log.Id" class="text-area result-area" placeholder="Самочувствие, техника, что учесть в следующий раз" value="@recorded.Notes" @onchange="e => UpdateSessionNotes(log, e)"></textarea>
+                        <button class="primary-button finish-button" @onclick="() => Finish(log)">Завершить занятие</button>
+                    </article>
+                }
+            }
+
+            <div class="subsection-heading"><h2 class="list-heading">Программа</h2><span>@training.Count @(training.Count == 1 ? "день" : training.Count is >= 2 and <= 4 ? "дня" : "дней")</span></div>
+            @if (!training.Any())
+            {
+                <div class="empty-state workout-empty">
+                    <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M8 18v12m7-18v24m18-24v24m7-18v12M15 24h18" /></svg></div>
+                    <h3>Добавьте первый день</h3><p>Запишите упражнения, подходы, повторы и рабочие веса.</p>
+                    <button class="secondary-button" @onclick="NewTrainingDay">Создать план</button>
+                </div>
+            }
+            else
+            {
+                <div class="training-list">
+                    @foreach (var day in training)
+                    {
+                        var template = WorkoutDocuments.ReadPlan(day.Id, day.Name, day.Exercises);
+                        <article class="training-card">
+                            <div class="training-card-heading"><div><span class="training-kicker">ПЛАН ЗАНЯТИЯ</span><h2>@day.Name</h2></div><button class="icon-button small" @onclick="() => EditDay(day)" aria-label="Изменить план: @day.Name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L4 20Z" /></svg></button></div>
+                            @if (template.Exercises.Count == 0)
+                            {
+                                <p class="field-hint">Упражнения ещё не добавлены.</p>
+                            }
+                            else
+                            {
+                                <div class="exercise-list">
+                                    @foreach (var exercise in template.Exercises)
+                                    {
+                                        <div class="exercise-row structured-exercise"><span class="exercise-bullet"></span><span><strong>@exercise.Name</strong><small>@FormatTargets(exercise)</small>@if (!string.IsNullOrWhiteSpace(exercise.Note)) { <small>@exercise.Note</small> }</span></div>
+                                    }
+                                </div>
+                            }
+                            <div class="training-card-actions"><button class="secondary-button" @onclick="() => EditDay(day)">Изменить план</button><button class="secondary-button" @onclick="() => OpenWorkoutSchedule(day)">Запланировать</button><button class="primary-button" @onclick="() => Start(day)" disabled="@(template.Exercises.Count == 0)">Начать</button></div>
+                        </article>
+                    }
+                </div>
+            }
+
+            @if (FinishedLogs.Any())
+            {
+                <details class="history-details"><summary>История занятий <span>@FinishedLogs.Count</span></summary>
+                    @foreach (var log in FinishedLogs)
+                    {
+                        <article class="history-card"><div class="history-date">@FormatMoscow(log.Started) · Завершено</div><h3>@log.Name</h3>@if (!string.IsNullOrWhiteSpace(FormatWorkoutLog(log))) { <p class="history-results">@FormatWorkoutLog(log)</p> }<button class="text-button" @onclick="() => EditResults(log)">Изменить результаты</button></article>
+                    }
+                </details>
+            }
+        }
+        else
+        {
+            <section class="screen-heading"><div><p class="eyebrow">PERSONALFLOW</p><h1>Настройки</h1><p class="screen-subtitle">Управление приложением и данными.</p></div></section>
+            var syncStatus = Store.SyncStatus;
+            var epochConflicts = Store.GetSyncEpochConflicts();
+            <article class="settings-card">
+                <div class="settings-card-top"><span class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg></span><div><h2>Аккаунт и синхронизация</h2><p>Вход проходит в системном браузере с подтверждением вторым фактором.</p></div></div>
+                <label class="field-label" for="identity-authority">Сервер входа (Identity)</label>
+                <input id="identity-authority" class="text-input" type="url" inputmode="url" autocomplete="url" placeholder="https://identity.example.org/" @bind="identityAuthorityDraft" disabled="@authSignedIn" />
+                <label class="field-label" for="life-api">Планы и заметки</label>
+                <input id="life-api" class="text-input" type="url" inputmode="url" autocomplete="url" placeholder="https://life.example.org/" @bind="lifeApiDraft" disabled="@authSignedIn" />
+                <label class="field-label" for="learning-api">Обучение</label>
+                <input id="learning-api" class="text-input" type="url" inputmode="url" autocomplete="url" placeholder="https://learning.example.org/" @bind="learningApiDraft" disabled="@authSignedIn" />
+                <p class="settings-note">После настройки VPS укажите адреса сервисов. Принимаются только HTTPS адреса; пароль и коды остаются в системном браузере.</p>
+                <div class="button-row account-actions">
+                    <button class="secondary-button" @onclick="SaveServerEndpoints" disabled="@authBusy">Сохранить адреса</button>
+                    @if (authSignedIn)
+                    {
+                        <button class="primary-button" @onclick="SynchronizeNow" disabled="@authBusy">@(authBusy ? "Синхронизация…" : "Синхронизировать")</button>
+                        <button class="secondary-button" @onclick="SignOut" disabled="@authBusy">Выйти</button>
+                    }
+                    else
+                    {
+                        <button class="primary-button" @onclick="ConnectAccount" disabled="@authBusy">@(authBusy ? "Открываем вход…" : "Подключить аккаунт")</button>
+                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(authMessage)) { <p class="settings-note" role="status">@authMessage</p> }
+            </article>
+            <article class="settings-card">
+                <div class="settings-card-top"><span class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42" /><circle cx="12" cy="12" r="5" /></svg></span><div><h2>Данные на устройстве</h2><p>Изменения записываются локально в SQLite.</p></div></div>
+                <div class="settings-row"><span>Статус сервера</span><strong class="@(authSignedIn ? "reminder-enabled" : "pending-badge")">@(authSignedIn ? "Аккаунт подключён" : Identity.IsConfigured ? "Требуется вход" : "Адреса не заданы")</strong></div>
+                <div class="settings-row"><span>Синхронизация</span><strong>@backgroundSyncStatus.StateLabel</strong></div>
+                <p class="settings-note">@backgroundSyncStatus.LastSyncLabel. Автоматическая попытка запускается при открытии приложения и возвращении в него.</p>
+                @if (!string.IsNullOrWhiteSpace(backgroundSyncStatus.Notice)) { <p class="settings-note" role="status">@backgroundSyncStatus.Notice</p> }
+                <div class="settings-row"><span>Локальная очередь изменений</span><strong>@syncStatus.Pending</strong></div>
+                <div class="settings-row"><span>Конфликты, требующие решения</span><strong>@syncStatus.Conflicts</strong></div>
+                <div class="settings-row"><span>Обнаруженные смены эпохи сервера</span><strong>@epochConflicts.Count</strong></div>
+                <p class="settings-note">Изменения сначала сохраняются локально. При отсутствии сети очередь остаётся на устройстве и отправляется при следующем успешном подключении.</p>
+                @if (syncStatus.Conflicts > 0) { <p class="settings-note" role="status">Локальные данные сохранены. Изменения ждут вашего решения.</p> }
+                @if (epochConflicts.Count > 0)
+                {
+                    <section class="sync-conflict-inbox" aria-labelledby="epoch-recovery-title">
+                        <h3 id="epoch-recovery-title">Сверка после восстановления сервера</h3>
+                        <p class="settings-note">История сервера изменилась. Локальные планы и ответы сохранены. Сверка перечитает сервер, попробует объединить независимые изменения и покажет конфликтующие поля для выбора. Старые версии конфликтов останутся доступны в архиве только для просмотра.</p>
+                        @foreach (var conflict in epochConflicts)
+                        {
+                            <article class="sync-conflict-card">
+                                <div><strong>@(conflict.Service == "life" ? "Планы и заметки" : "Обучение")</strong><span>@(conflict.RecoveryStarted ? conflict.SnapshotComplete ? "Снимок получен; отправляются локальные правки" : "Снимок сервера загружается; сверка продолжится при следующем подключении" : "Локальная очередь ждёт сверки")</span></div>
+                            </article>
+                        }
+                        <button class="primary-button full-button" @onclick="RecoverSyncEpochs" disabled="@(authBusy || backgroundSyncStatus.IsRunning || !authSignedIn)">@(authBusy ? "Сверяем версии…" : "Сверить сервер и сохранить локальные правки")</button>
+                    </section>
+                }
+                @if (syncConflicts.Count > 0)
+                {
+                    <section class="sync-conflict-inbox" aria-labelledby="conflict-inbox-title">
+                        <h3 id="conflict-inbox-title">Конфликты данных</h3>
+                        @foreach (var conflict in syncConflicts)
+                        {
+                            <article class="sync-conflict-card">
+                                <div><strong>@ConflictTitle(conflict)</strong><span>@(conflict.ArchivedEpoch ? "Архив после смены эпохи · только просмотр" : conflict.ResolutionPending ? "Решение сохранено на устройстве и ожидает отправки" : (conflict.Service == "life" ? "Планы и заметки" : "Обучение") + " · ревизия сервера " + conflict.ServerRevision)</span></div>
+                                <button class="secondary-button" @onclick="() => OpenConflict(conflict)" disabled="@(conflict.ResolutionPending || authBusy || backgroundSyncStatus.IsRunning)">@(conflict.ArchivedEpoch ? "Открыть архив" : conflict.ResolutionPending ? "Ожидает синхронизации" : selectedConflict?.Id == conflict.Id ? "Открыто" : "Сравнить версии")</button>
+                            </article>
+                        }
+                    </section>
+                }
+                @if (selectedConflict is { } currentConflict)
+                {
+                    <section class="sync-conflict-detail" aria-labelledby="conflict-detail-title">
+                        <div class="sheet-heading"><div><p class="eyebrow">@(currentConflict.ArchivedEpoch ? "АРХИВ · ТОЛЬКО ПРОСМОТР" : "ТРЕБУЕТ РЕШЕНИЯ")</p><h3 id="conflict-detail-title">@ConflictTitle(currentConflict)</h3></div><button class="icon-button small" @onclick="CloseConflict" aria-label="Закрыть сравнение">×</button></div>
+                        @if (currentConflict.ArchivedEpoch)
+                        {
+                            <p class="settings-note">Это сохранённый снимок конфликта до восстановления сервера. Он доступен для сравнения; новое решение принимайте в актуальном конфликте после сверки.</p>
+                            @if (currentConflict.LocalDeleted || currentConflict.ServerDeleted)
+                            {
+                                <p class="settings-note">Состояние удаления — локально: @(currentConflict.LocalDeleted ? "удалено" : "редакция сохранена"); на сервере: @(currentConflict.ServerDeleted ? "удалено" : "редакция сохранена").</p>
+                            }
+                            @foreach (var field in conflictFields)
+                            {
+                                <article class="conflict-field-card">
+                                    <h4>@field.Label</h4>
+                                    <div class="conflict-value"><span>Исходное</span><p>@field.BaseText</p></div>
+                                    <div class="conflict-value"><span>Сохранено на сервере</span><p>@field.ServerText</p></div>
+                                    <div class="conflict-value"><span>Сохранено локально</span><p>@field.LocalText</p></div>
+                                </article>
+                            }
+                        }
+                        else
+                        {
+                        @if (currentConflict.LocalDeleted || currentConflict.ServerDeleted)
+                        {
+                            <div class="conflict-choice-actions">
+                                <button class="secondary-button" @onclick='() => ResolveConflictVersion("server")'>Сервер: @ConflictStateLabel(currentConflict.ServerDeleted)</button>
+                                <button class="secondary-button" @onclick='() => ResolveConflictVersion("local")'>Моё устройство: @ConflictStateLabel(currentConflict.LocalDeleted)</button>
+                            </div>
+                        }
+                        @if (conflictFields.Count == 0 && !currentConflict.LocalDeleted && !currentConflict.ServerDeleted)
+                        {
+                            <p class="settings-note">Для этого конфликта не удалось выделить поля для объединения. Сохранённые версии не изменены.</p>
+                        }
+                        @if (conflictFields.Count > 0)
+                        {
+                            <div class="conflict-choice-actions">
+                                <button class="secondary-button" @onclick='() => ChooseConflictVersion("server")'>Выбрать все серверные значения</button>
+                                <button class="secondary-button" @onclick='() => ChooseConflictVersion("local")'>Выбрать мои значения</button>
+                            </div>
+                            @foreach (var field in conflictFields)
+                            {
+                                <article class="conflict-field-card">
+                                    <h4>@field.Label</h4>
+                                    <div class="conflict-value"><span>Исходное</span><p>@field.BaseText</p></div>
+                                    <div class="conflict-value"><span>На сервере</span><p>@field.ServerText</p><button class="text-button @(field.Choice == "server" ? "chosen" : "")" aria-pressed='@(field.Choice == "server")' @onclick='() => field.Choice = "server"'>Оставить серверное</button></div>
+                                    <div class="conflict-value"><span>Моё предложение</span><p>@field.LocalText</p><button class="text-button @(field.Choice == "local" ? "chosen" : "")" aria-pressed='@(field.Choice == "local")' @onclick='() => field.Choice = "local"'>Оставить моё</button></div>
+                                    @if (field.IsEditable)
+                                    {
+                                        <label class="field-label">Объединённое значение
+                                            @if (field.IsLongText)
+                                            {
+                                                <textarea class="text-area conflict-long-text" rows="5" @bind="field.ManualValue" @bind:event="oninput" @onfocus='() => field.Choice = "manual"'></textarea>
+                                            }
+                                            else
+                                            {
+                                                <input class="text-input" @bind="field.ManualValue" @bind:event="oninput" @onfocus='() => field.Choice = "manual"' />
+                                            }
+                                            @if (field.Choice == "manual") { <span class="conflict-custom-selected">Используется ваше значение</span> }
+                                        </label>
+                                    }
+                                </article>
+                            }
+                            <div class="sheet-actions"><button class="primary-button" @onclick="ResolveSelectedConflict" disabled="@(authBusy || backgroundSyncStatus.IsRunning)">@(authBusy ? "Сохраняем…" : currentConflict.LocalDeleted || currentConflict.ServerDeleted ? "Сохранить редакцию и восстановить" : "Сохранить объединённый вариант")</button></div>
+                        }
+                        }
+                    </section>
+                }
+            </article>
+            <article class="settings-card">
+                <div class="settings-card-top"><span class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg></span><div><h2>Напоминания</h2><p>Локально на этом устройстве, без отправки расписания на сервер.</p></div></div>
+                <div class="settings-row"><span>Уведомления</span><strong class="@(reminderStatus?.NotificationsAllowed == true ? "reminder-enabled" : "pending-badge")">@(reminderStatus?.NotificationsAllowed == true ? "Разрешены" : "Не разрешены")</strong></div>
+                @if (reminderStatus?.NotificationsAllowed == true)
+                {
+                    <div class="settings-row"><span>Точное время</span><strong class="@(reminderStatus.ExactTimeAvailable ? "reminder-enabled" : "pending-badge")">@(reminderStatus.ExactTimeAvailable ? "Доступно" : "Ожидает разрешения")</strong></div>
+                }
+                <p class="settings-note">@(reminderStatus?.Description ?? "Проверяем системные разрешения.") Для дел со временем создаются уведомления за час и в указанное время. Время берётся из расписания PersonalFlow (Москва).</p>
+                <button class="secondary-button reminder-button" @onclick="EnableReminders" disabled="@reminderRequesting">@(reminderRequesting ? "Проверяем…" : reminderStatus?.NotificationsAllowed == true ? "Обновить расписание" : "Настроить уведомления")</button>
+            </article>
+            <article class="settings-card">
+                <div class="settings-card-top"><span class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></span><div><h2>Часовой пояс</h2><p>Регулярные планы ориентируются на московское время.</p></div></div>
+                <div class="settings-row"><span>Текущая зона</span><strong>Europe/Moscow</strong></div>
+            </article>
+            <p class="app-version">PersonalFlow · Версия 1.0</p>
+        }
+
+        @if (message is not null) { <div role="status" aria-live="polite" class="toast-message">@message</div> }
+    </main>
+
+    <nav class="bottom-nav" aria-label="Основные разделы">
+        @foreach (var item in tabs)
+        {
+            <button class="nav-item @(tab == item.Key ? "active" : "")" @onclick="() => Navigate(item.Key)" aria-current="@(tab == item.Key ? "page" : null)">
+                <span class="nav-icon" aria-hidden="true">
+                    @if (item.Key == "plan") { <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="3" /><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" /></svg> }
+                    else if (item.Key == "learn") { <svg viewBox="0 0 24 24"><path d="M3.5 5.5c3.7-.9 6.5-.3 8.5 1.5v13c-2-1.8-4.8-2.4-8.5-1.5v-13ZM20.5 5.5c-3.7-.9-6.5-.3-8.5 1.5v13c2-1.8 4.8-2.4 8.5-1.5v-13Z" /></svg> }
+                    else if (item.Key == "notes") { <svg viewBox="0 0 24 24"><path d="M6 3.5h9l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V5a1.5 1.5 0 0 1 1-1.5Z" /><path d="M14 4v5h5M8.5 13h7M8.5 16.5h7" /></svg> }
+                    else { <svg viewBox="0 0 24 24"><path d="M3 9v6m4-9v12m10-12v12m4-9v6M7 12h10" /><path d="M2 10h2v4H2zm4-2h2v8H6zm10 0h2v8h-2zm4 2h2v4h-2z" /></svg> }
+                </span>
+                <span>@item.Name</span>
+            </button>
+        }
+    </nav>
+</div>
+
+@if (recurrenceManager)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="recurrence-manager-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ПЛАНЫ</p><h2 id="recurrence-manager-title">Повторяющиеся дела</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть">×</button></div>
+            <p class="field-hint">Перенос или пропуск меняет только выбранное вхождение. Настройка серии влияет на будущие даты.</p>
+            @if (recurrences.Count == 0) { <div class="empty-state compact-empty"><h3>Повторов пока нет</h3><p>Создайте регулярное дело и выберите дни недели или месяца.</p></div> }
+            <div class="recurrence-list">
+                @foreach (var series in recurrences.OrderBy(x => x.Title, StringComparer.CurrentCulture))
+                {
+                    <button class="recurrence-card" @onclick="() => EditRecurrence(series.Id)">
+                        <span class="recurrence-card-mark" aria-hidden="true">↻</span>
+                        <span><strong>@series.Title</strong><small>@RecurrenceSummary(series) · с @series.StartsOn.ToString("d MMM yyyy", culture)</small>@if (series.ExclusionCategory is not null) { <small>Пропускать отпуск: @series.ExclusionCategory</small> }</span>
+                        <span class="recurrence-chevron" aria-hidden="true">›</span>
+                    </button>
+                }
+            </div>
+            <button class="primary-button full-button" @onclick="NewRecurrence">Создать повтор</button>
+            <button class="secondary-button full-button" @onclick="OpenVacationManager">Настроить отпуска</button>
+        </section>
+    </div>
+}
+
+@if (recurrenceEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="recurrence-editor-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ПОВТОРЯЮЩЕЕСЯ ДЕЛО · МОСКВА</p><h2 id="recurrence-editor-title">@(recurrenceId is null ? "Новый повтор" : "Изменить серию")</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть">×</button></div>
+            <label class="field-label" for="recurrence-title">Название дела</label><input id="recurrence-title" class="text-input" @bind="recurrenceTitle" maxlength="200" placeholder="Например, еженедельная встреча" />
+            <label class="field-label" for="recurrence-time">Время · Москва</label><input id="recurrence-time" class="text-input" type="time" value="@recurrenceTime" @onchange="SetRecurrenceTime" />
+            <label class="field-label" for="recurrence-pattern">Повторять</label>
+            <select id="recurrence-pattern" class="text-input" value="@recurrencePattern" @onchange="SetRecurrencePattern">
+                <option value="daily">Каждый день</option><option value="weekdays">По будням</option><option value="weekends">По выходным</option><option value="weekly">В выбранные дни недели</option><option value="monthly">В выбранный день месяца</option>
+            </select>
+            <div class="field-grid"><div><label class="field-label" for="recurrence-interval">Интервал</label><input id="recurrence-interval" class="text-input" type="number" min="1" max="365" value="@recurrenceInterval" @onchange="SetRecurrenceInterval" /></div><div class="interval-unit">@(recurrencePattern == "daily" ? "дней" : recurrencePattern == "monthly" ? "месяцев" : "недель")</div></div>
+            @if (recurrencePattern == "weekly")
+            {
+                <div class="field-label">Дни недели</div>
+                <div class="weekday-picker">
+                    @foreach (var (day, name) in weekdayChoices)
+                    {
+                        <button class="weekday-choice @(recurrenceWeekdays.Contains(day) ? "selected" : "")" @onclick="() => ToggleWeekday(day)" aria-pressed="@recurrenceWeekdays.Contains(day)">@name</button>
+                    }
+                </div>
+            }
+            @if (recurrencePattern == "monthly")
+            {
+                <label class="field-label" for="recurrence-month-day">День месяца</label><input id="recurrence-month-day" class="text-input" type="number" min="1" max="31" value="@recurrenceMonthDay" @onchange="SetMonthDay" />
+                <p class="field-hint">Если в месяце нет этого числа, повтора в этом месяце не будет.</p>
+            }
+            <div class="field-grid"><div><label class="field-label" for="recurrence-start">Начать</label><input id="recurrence-start" class="text-input" type="date" value="@RecurrenceStartValue" @onchange="SetRecurrenceStartDate" /></div><div><label class="field-label" for="recurrence-end">Закончить</label><input id="recurrence-end" class="text-input" type="date" value="@RecurrenceEndValue" @onchange="SetRecurrenceEndDate" disabled="@(!recurrenceHasEnd)" /></div></div>
+            <label class="toggle-row"><input type="checkbox" @bind="recurrenceHasEnd" /><span>Указать дату окончания</span></label>
+            <label class="field-label" for="recurrence-exclusion">Пропускать во время отпуска</label>
+            <select id="recurrence-exclusion" class="text-input" @bind="recurrenceCategory"><option value="">Не пропускать</option>@foreach (var category in VacationCategories) { <option value="@category">@category</option> }</select>
+            <label class="field-label" for="recurrence-workout">Связанный план тренировки</label>
+            <select id="recurrence-workout" class="text-input" @bind="recurrenceWorkoutDayId"><option value="">Без тренировки</option>@foreach (var day in training) { <option value="@day.Id">@day.Name</option> }</select>
+            @if (RecurrencePreview() is { Count: > 0 } preview)
+            {
+                <div class="recurrence-preview"><strong>Ближайшие даты</strong><div>@foreach (var date in preview) { <span>@date.ToString("ddd, d MMM", culture)</span> }</div></div>
+            }
+            else { <p class="field-hint validation-hint">Для выбранных правил нет будущих дат. Проверьте день, интервал и конец серии.</p> }
+            <div class="sheet-actions"><button class="primary-button" @onclick="SaveRecurrence" disabled="@string.IsNullOrWhiteSpace(recurrenceTitle)">Сохранить серию</button>@if (recurrenceId is not null) { <button class="delete-action" @onclick="AskDeleteRecurrence">Удалить серию</button> }</div>
+        </section>
+    </div>
+}
+
+@if (vacationManager)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="vacation-manager-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ИСКЛЮЧЕНИЯ И ОТПУСКА</p><h2 id="vacation-manager-title">Периоды отсутствия</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть">×</button></div>
+            <p class="field-hint">Период целиком исключает совпадающие повторы выбранной категории. Разовые дела сохраняются.</p>
+            @if (vacations.Count == 0) { <div class="empty-state compact-empty"><h3>Периодов пока нет</h3><p>Добавьте периоды и категорию; затем укажите ту же категорию в правилах повтора.</p></div> }
+            <div class="vacation-list">
+                @foreach (var vacation in vacations.OrderBy(x => x.Start))
+                {
+                    <article class="vacation-card"><div><strong>@vacation.Title</strong><span class="vacation-category">@vacation.Category</span><small>@vacation.Start.ToString("d MMM yyyy", culture) — @vacation.End.ToString("d MMM yyyy", culture)</small></div><div class="vacation-actions"><button class="text-button" @onclick="() => EditVacation(vacation)">Изменить</button><button class="delete-action" @onclick="() => AskDeleteVacation(vacation)">Удалить</button></div></article>
+                }
+            </div>
+            @if (vacationFormOpen)
+            {
+                <div class="vacation-form">
+                    <h3>@(vacationId is null ? "Новый период" : "Изменить период")</h3>
+                    <label class="field-label" for="vacation-category">Категория</label><input id="vacation-category" class="text-input" @bind="vacationCategory" maxlength="80" placeholder="Например, личный отпуск" list="vacation-categories" /><datalist id="vacation-categories">@foreach (var category in VacationCategories) { <option value="@category"></option> }</datalist>
+                    <label class="field-label" for="vacation-title">Подпись</label><input id="vacation-title" class="text-input" @bind="vacationTitle" maxlength="120" placeholder="Отпуск" />
+                    <div class="field-grid"><div><label class="field-label" for="vacation-start">Начало</label><input id="vacation-start" class="text-input" type="date" value="@VacationStartValue" @onchange="SetVacationStartDate" /></div><div><label class="field-label" for="vacation-end">Окончание</label><input id="vacation-end" class="text-input" type="date" value="@VacationEndValue" @onchange="SetVacationEndDate" /></div></div>
+                    <div class="button-row"><button class="primary-button" @onclick="SaveVacation" disabled="@string.IsNullOrWhiteSpace(vacationCategory)">Сохранить период</button><button class="secondary-button" @onclick="CancelVacationEdit">Отмена</button></div>
+                </div>
+            }
+            else { <button class="primary-button full-button" @onclick="NewVacation">Добавить период</button> }
+        </section>
+    </div>
+}
+
+@if (taskEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="task-editor-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ПЛАНЫ</p><h2 id="task-editor-title">@(taskId is null ? "Новое дело" : "Изменить дело")</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            <label class="field-label" for="task-title">Название</label>
+            <input id="task-title" class="text-input" @bind="title" placeholder="Например, созвониться с врачом" maxlength="200" />
+            <div class="field-grid"><div><label class="field-label" for="task-date">Дата</label><input id="task-date" class="text-input" type="date" value="@EditDateValue" @onchange="SetEditDate" /></div><div><label class="field-label" for="task-time">Время · Москва</label><input id="task-time" class="text-input" type="time" value="@time" @onchange="SetTime" /></div></div>
+            <div class="sheet-actions"><button class="primary-button" @onclick="SaveTask" disabled="@string.IsNullOrWhiteSpace(title)">Сохранить дело</button>@if (taskId is not null) { <button class="delete-action" @onclick="() => confirmDeleteTask = true">Удалить дело</button> }</div>
+        </section>
+    </div>
+}
+
+@if (moveEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="move-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ИЗМЕНИТЬ ДАТУ</p><h2 id="move-title">Перенести дело</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            <div class="move-preview"><span class="move-preview-icon"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span><span>@moveTitle</span></div>
+            <label class="field-label" for="move-date">Новый день</label><input id="move-date" class="text-input" type="date" value="@MoveDateValue" @onchange="SetMoveDate" />
+            <p class="field-hint">Дело будет перенесено целиком. Остальные планы этого дня сохранятся.</p>
+            <button class="primary-button full-button" @onclick="SaveMove">Перенести</button>
+        </section>
+    </div>
+}
+
+@if (noteEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="note-editor-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ЗАМЕТКИ</p><h2 id="note-editor-title">@(noteId is null ? "Новая заметка" : "Изменить заметку")</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            <label class="field-label" for="note-text">Текст или ссылка</label><textarea id="note-text" class="text-area note-editor-area" @bind="noteText" maxlength="10000" placeholder="Запишите мысль, ссылку или то, что важно не забыть."></textarea>
+            <div class="field-hint char-count">@noteText.Length / 10 000</div>
+            <button class="primary-button full-button" @onclick="SaveNote" disabled="@string.IsNullOrWhiteSpace(noteText)">Сохранить заметку</button>
+        </section>
+    </div>
+}
+
+@if (trainingEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="training-editor-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ПЛАН ТРЕНИРОВОК</p><h2 id="training-editor-title">@(dayId is null ? "Новый день" : "Изменить план")</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            <label class="field-label" for="day-name">Название дня</label><input id="day-name" class="text-input" @bind="dayName" maxlength="80" placeholder="Например, День A" />
+            <div class="workout-editor-heading"><h3>Упражнения</h3><button class="secondary-button" @onclick="AddExercise">Добавить</button></div>
+            @if (exerciseDrafts.Count == 0) { <div class="field-hint">Добавьте упражнение, затем задайте цель каждого подхода.</div> }
+            @for (var exerciseIndex = 0; exerciseIndex < exerciseDrafts.Count; exerciseIndex++)
+            {
+                var exercise = exerciseDrafts[exerciseIndex];
+                <article class="exercise-editor-card">
+                    <div class="exercise-editor-heading"><strong>Упражнение @(exerciseIndex + 1)</strong><div class="editor-reorder"><button class="icon-button small" @onclick="() => MoveExercise(exercise, -1)" disabled="@(exerciseIndex == 0)" aria-label="Выше">↑</button><button class="icon-button small" @onclick="() => MoveExercise(exercise, 1)" disabled="@(exerciseIndex == exerciseDrafts.Count - 1)" aria-label="Ниже">↓</button><button class="delete-action" @onclick="() => RemoveExercise(exercise)">Удалить</button></div></div>
+                    <label class="field-label" for="exercise-name-@exercise.Id">Название упражнения</label><input id="exercise-name-@exercise.Id" class="text-input" @bind="exercise.Name" maxlength="120" placeholder="Например, Жим штанги лёжа" />
+                    <div class="sets-heading"><span>Цели подходов</span><button class="text-button" @onclick="() => AddSet(exercise)">+ Подход</button></div>
+                    @for (var setIndex = 0; setIndex < exercise.Sets.Count; setIndex++)
+                    {
+                        var set = exercise.Sets[setIndex];
+                        <div class="set-editor-row">
+                            <span class="set-number">@(setIndex + 1)</span>
+                            <label><span>Повторы</span><input type="number" min="1" max="1000" inputmode="numeric" value="@set.Repetitions" @onchange="e => UpdateDraftSet(set, 'r', e)" /></label>
+                            <label><span>Нагрузка</span><input type="number" min="0" max="100000" step="0.1" inputmode="decimal" value="@set.Load" @onchange="e => UpdateDraftSet(set, 'l', e)" /></label>
+                            <label><span>Ед.</span><input value="@set.Unit" maxlength="20" placeholder="кг" @onchange="e => UpdateDraftSet(set, 'u', e)" /></label>
+                            <button class="icon-button small remove-set" @onclick="() => RemoveSet(exercise, set)" disabled="@(exercise.Sets.Count == 1)" aria-label="Удалить подход">×</button>
+                        </div>
+                    }
+                    <label class="field-label" for="exercise-note-@exercise.Id">Подсказка или особая цель</label><textarea id="exercise-note-@exercise.Id" class="text-area exercise-note-input" @bind="exercise.Note" placeholder="Например, вес на одну гантель; или 30 секунд удержания"></textarea>
+                </article>
+            }
+            <div class="sheet-actions"><button class="primary-button" @onclick="SaveDay" disabled="@string.IsNullOrWhiteSpace(dayName)">Сохранить план</button>@if (dayId is not null) { <button class="delete-action" @onclick="() => confirmDeleteTrainingDay = true">Удалить план</button> }</div>
+        </section>
+    </div>
+}
+
+@if (workoutScheduleEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="workout-schedule-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ПЛАН ТРЕНИРОВОК</p><h2 id="workout-schedule-title">Добавить в календарь</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть">×</button></div>
+            <p class="field-hint">@workoutScheduleName · даты и повтор привязаны к московскому времени.</p>
+            <label class="field-label" for="workout-schedule-mode">Расписание</label>
+            <select id="workout-schedule-mode" class="text-input" @bind="workoutScheduleMode"><option value="once">Один раз</option><option value="weekly">Еженедельно</option></select>
+            <label class="field-label" for="workout-schedule-start">Начальная дата</label><input id="workout-schedule-start" class="text-input" type="date" value="@WorkoutScheduleStartValue" @onchange="SetWorkoutScheduleStart" />
+            @if (workoutScheduleMode == "weekly")
+            {
+                <div class="field-label">Дни недели</div>
+                <div class="weekday-picker">
+                    @foreach (var (day, name) in weekdayChoices)
+                    {
+                        <button class="weekday-choice @(workoutScheduleWeekdays.Contains(day) ? "selected" : "")" @onclick="() => ToggleWorkoutScheduleWeekday(day)" aria-pressed="@workoutScheduleWeekdays.Contains(day)">@name</button>
+                    }
+                </div>
+                <div class="field-grid"><div><label class="field-label" for="workout-schedule-interval">Интервал</label><input id="workout-schedule-interval" class="text-input" type="number" min="1" max="52" @bind="workoutScheduleInterval" /></div><div class="interval-unit">недель</div></div>
+                <label class="toggle-row"><input type="checkbox" @bind="workoutScheduleHasEnd" /><span>Указать дату окончания</span></label>
+                <label class="field-label" for="workout-schedule-end">Закончить</label><input id="workout-schedule-end" class="text-input" type="date" value="@WorkoutScheduleEndValue" @onchange="SetWorkoutScheduleEnd" disabled="@(!workoutScheduleHasEnd)" />
+                <label class="field-label" for="workout-schedule-category">Пропускать по категории отпуска</label>
+                <select id="workout-schedule-category" class="text-input" @bind="workoutScheduleCategory"><option value="">Не пропускать</option>@foreach (var category in VacationCategories) { <option value="@category">@category</option> }</select>
+            }
+            <label class="field-label" for="workout-schedule-time">Время по Москве</label><input id="workout-schedule-time" class="text-input" type="time" value="@workoutScheduleTime" @onchange="SetWorkoutScheduleTime" />
+            <div class="sheet-actions"><button class="primary-button" @onclick="SaveWorkoutSchedule">Добавить в планы</button><button class="secondary-button" @onclick="CloseSheets">Отмена</button></div>
+        </section>
+    </div>
+}
+
+@if (resultEditor)
+{
+    <div class="sheet-backdrop" @onclick="CloseSheets">
+        <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="result-editor-title" @onclick:stopPropagation="true">
+            <div class="sheet-grabber"></div>
+            <div class="sheet-heading"><div><p class="eyebrow">ИСТОРИЯ ЗАНЯТИЙ</p><h2 id="result-editor-title">Результаты</h2></div><button class="icon-button" @onclick="CloseSheets" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            @foreach (var log in logs.Where(x => x.Id == resultLogId))
+            {
+                var template = WorkoutDocuments.ReadPlan(log.DayId, log.Name, log.Snapshot);
+                var recorded = WorkoutDocuments.ReadLog(log.Results);
+                @foreach (var exercise in template.Exercises)
+                {
+                    <section class="session-exercise">
+                        <div class="session-exercise-heading"><h3>@exercise.Name</h3><span>@FormatTargets(exercise)</span></div>
+                        @foreach (var target in exercise.Sets)
+                        {
+                            var actual = recorded.Sets.FirstOrDefault(x => x.SetId == target.Id);
+                            <div class="session-set">
+                                <div class="session-set-target"><span>Подход</span><strong>@WorkoutDocuments.FormatTarget(target)</strong></div>
+                                <label><span>Повторы</span><input type="number" min="0" max="1000" inputmode="numeric" value="@ResultRepetitions(actual)" @onchange="e => UpdateSessionSet(log, target, e, true)" /></label>
+                                <label><span>Вес</span><input type="number" min="0" max="100000" step="0.1" inputmode="decimal" value="@ResultLoad(actual)" @onchange="e => UpdateSessionSet(log, target, e, false)" /></label>
+                                <label class="set-complete"><input type="checkbox" checked="@(actual?.Completed ?? false)" @onchange="e => UpdateSessionCompleted(log, target, e)" /><span>Готово</span></label>
+                            </div>
+                        }
+                    </section>
+                }
+                <label class="field-label" for="history-notes-@log.Id">Заметка</label><textarea id="history-notes-@log.Id" class="text-area note-editor-area" value="@recorded.Notes" @onchange="e => UpdateSessionNotes(log, e)"></textarea>
+            }
+            <button class="primary-button full-button" @onclick="SaveResults">Готово</button>
+        </section>
+    </div>
+}
+
+@if (confirmDeleteTask || confirmDeleteNote || confirmDeleteTrainingDay || confirmDeleteRecurrence || confirmDeleteVacation)
+{
+    <div class="sheet-backdrop confirm-backdrop" @onclick="CloseConfirmation">
+        <section class="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" @onclick:stopPropagation="true">
+            <div class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3" /></svg></div>
+            <h2 id="confirm-title">Удалить без возможности отмены?</h2>
+            <p>@ConfirmationText</p>
+            <div class="confirm-actions"><button class="secondary-button" @onclick="CloseConfirmation">Оставить</button><button class="danger-button" @onclick="ConfirmDelete">Удалить</button></div>
+        </section>
+    </div>
+}
+
+@code {
+    readonly CultureInfo culture = new("ru-RU");
+    readonly (string Key, string Name)[] tabs = [("plan", "Планы"), ("learn", "Учёба"), ("notes", "Заметки"), ("workouts", "Тренировки")];
+    readonly string[] weekdayHeaders = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
+    readonly (DayOfWeek Day, string Name)[] weekdayChoices = [(DayOfWeek.Monday, "Пн"), (DayOfWeek.Tuesday, "Вт"), (DayOfWeek.Wednesday, "Ср"), (DayOfWeek.Thursday, "Чт"), (DayOfWeek.Friday, "Пт"), (DayOfWeek.Saturday, "Сб"), (DayOfWeek.Sunday, "Вс")];
+    static readonly TimeZoneInfo Moscow = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
+    static readonly Guid LessonId = Guid.Parse("c1bff05b-f5ba-447e-ae92-6dd5b1824861");
+    static readonly LearningSource DemoSource = new("Cancellation in managed threads", "https://learn.microsoft.com/dotnet/standard/threading/cancellation-in-managed-threads", null, new DateOnly(2026, 11, 27));
+    const string DemoTheory = "Передавайте CancellationToken через асинхронные границы вплоть до HTTP-запроса или обращения к базе данных. Проверяйте отмену до дорогостоящей работы и не подавляйте OperationCanceledException как обычную ошибку.\n\nУ отмены есть владелец: UI может прекратить ожидание, сервер — освободить ресурсы, а нижний слой — остановить I/O. Если слой принимает токен, но не передаёт его дальше, договорённость обрывается.";
+    const string DemoPractice = "Пользователь закрыл экран во время загрузки списка. Где вы передадите токен отмены и как отличите ожидаемую отмену от сетевой ошибки?";
+
+    string tab = "plan", search = "", noteText = "", dayName = "", title = "", time = "", moveTitle = "";
+    string recurrenceTitle = "", recurrenceTime = "", recurrencePattern = "weekly", recurrenceCategory = "";
+    string workoutScheduleName = "", workoutScheduleMode = "once", workoutScheduleTime = "", workoutScheduleCategory = "";
+    string vacationCategory = "", vacationTitle = "";
+    string? message;
+    string? shareText;
+    string identityAuthorityDraft = string.Empty, lifeApiDraft = string.Empty, learningApiDraft = string.Empty;
+    string? authMessage;
+    string answerDraft = string.Empty, notesDraft = string.Empty, evidenceDraft = string.Empty;
+    List<LearningLessonContent> availableLessons = [];
+    LearningLessonContent? activeLesson;
+    List<ClientSyncConflict> syncConflicts = [];
+    ClientSyncConflict? selectedConflict;
+    List<ConflictFieldDraft> conflictFields = [];
+    JsonObject? conflictServerVersion;
+    JsonObject? conflictLocalVersion;
+    CancellationTokenSource? answerSaveCancellation;
+    Timer? messageTimer;
+    bool monthView, taskEditor, moveEditor, noteEditor, trainingEditor, workoutScheduleEditor, resultEditor, recurrenceManager, recurrenceEditor, vacationManager, vacationFormOpen;
+    bool reminderRequesting;
+    bool authBusy, authSignedIn;
+    MobileBackgroundSyncStatus backgroundSyncStatus = new(false, null, null);
+    bool confirmDeleteTask, confirmDeleteNote, confirmDeleteTrainingDay, confirmDeleteRecurrence, confirmDeleteVacation;
+    bool recurrenceHasEnd, workoutScheduleHasEnd;
+    Guid? taskId, noteId, dayId, pendingDeleteNoteId, resultLogId, recurrenceId, recurrenceWorkoutDayId, moveSeriesId, pendingVacationId, vacationId, workoutScheduleDayId;
+    DateOnly selectedDate = LocalStore.Today;
+    DateTime editDate = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime moveDate = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime recurrenceStart = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime recurrenceEnd = LocalStore.Today.AddYears(1).ToDateTime(TimeOnly.MinValue);
+    DateTime vacationStart = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime vacationEnd = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime workoutScheduleStart = LocalStore.Today.ToDateTime(TimeOnly.MinValue);
+    DateTime workoutScheduleEnd = LocalStore.Today.AddMonths(3).ToDateTime(TimeOnly.MinValue);
+    DateOnly? moveOriginalDate;
+    int recurrenceInterval = 1, recurrenceMonthDay = LocalStore.Today.Day, workoutScheduleInterval = 1;
+    HashSet<DayOfWeek> recurrenceWeekdays = [];
+    HashSet<DayOfWeek> workoutScheduleWeekdays = [];
+    List<WorkoutExerciseDraft> exerciseDrafts = [];
+    List<PlanItem> plans = [];
+    List<NoteItem> notes = [];
+    List<TrainingDay> training = [];
+    List<TrainingLog> logs = [];
+    List<Recurrence> recurrences = [];
+    List<Vacation> vacations = [];
+    List<OccurrenceOverride> occurrenceOverrides = [];
+    ReminderStatus? reminderStatus;
+    LearningProgress learningProgress = new(LessonId, 1);
+
+    List<PlannedEntry> SelectedDayTasks => EntriesFor(selectedDate, selectedDate).ToList();
+    TrainingLog? ScheduledLog(PlannedEntry item) => item.WorkoutDayId is null ? null : logs.FirstOrDefault(log => log.Id == item.Id);
+    List<Vacation> VacationsOn(DateOnly date) => vacations.Where(x => date >= x.Start && date <= x.End).OrderBy(x => x.Category, StringComparer.CurrentCulture).ToList();
+    List<Vacation> VisibleCalendarVacations()
+    {
+        var dates = (monthView ? MonthDays() : WeekDays()).ToArray();
+        if (dates.Length == 0) return [];
+        return vacations.Where(x => x.End >= dates[0] && x.Start <= dates[^1]).ToList();
+    }
+    string VacationTooltip(IReadOnlyCollection<Vacation> items) => string.Join(" · ", items.Select(x => $"{x.Category}: {x.Title}").Distinct(StringComparer.CurrentCulture));
+    string CalendarDayLabel(DateOnly date, int count, IReadOnlyCollection<Vacation> leave) => leave.Count == 0
+        ? $"{AccessibleDate(date)}, дел: {count}"
+        : $"{AccessibleDate(date)}, дел: {count}, отпуск: {VacationTooltip(leave)}";
+    IEnumerable<NoteItem> VisibleNotes => notes
+        .Where(x => x.Text.Contains(search, StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(x => x.Pinned).ThenByDescending(x => x.Created);
+    string[] VacationCategories => vacations.Select(x => x.Category).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCulture).ToArray();
+    List<TrainingLog> ActiveLogs => logs.Where(x => !x.Finished).OrderBy(x => x.Started).ToList();
+    List<TrainingLog> FinishedLogs => logs.Where(x => x.Finished).OrderByDescending(x => x.Started).ToList();
+    int ProgressPercent => SelectedDayTasks.Count == 0 ? 0 : (int)Math.Round(SelectedDayTasks.Count(x => x.Done) * 100d / SelectedDayTasks.Count);
+    bool LessonRead => learningProgress.Status == "Read";
+    string LessonTitle => activeLesson?.Title ?? "Отмена — это договорённость";
+    int LessonDuration => activeLesson?.EstimatedMinutes ?? 7;
+    string LessonIntro => activeLesson is null ? "CancellationToken не завершает операцию принудительно. Он сообщает, что работу пора остановить, а код должен корректно отреагировать." : $"{activeLesson.Date.ToString("d MMMM yyyy", culture)} · версия {activeLesson.Version}";
+    string LessonTheory => activeLesson?.Theory ?? DemoTheory;
+    string? LessonPractice => activeLesson?.Practice ?? (activeLesson is null && LocalStore.Today.DayOfWeek != DayOfWeek.Sunday ? DemoPractice : null);
+    bool IsTheoryOnly => activeLesson?.Date.DayOfWeek == DayOfWeek.Sunday || (activeLesson is null && LocalStore.Today.DayOfWeek == DayOfWeek.Sunday);
+    IReadOnlyList<LearningSource> CurrentLessonSources => activeLesson?.Sources ?? [DemoSource];
+    string EditDateValue => editDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string MoveDateValue => moveDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string RecurrenceStartValue => recurrenceStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string RecurrenceEndValue => recurrenceEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string VacationStartValue => vacationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string VacationEndValue => vacationEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string WorkoutScheduleStartValue => workoutScheduleStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string WorkoutScheduleEndValue => workoutScheduleEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    string ConfirmationText => confirmDeleteTask
+        ? "Дело исчезнет из планов. Это действие нельзя отменить."
+        : confirmDeleteNote
+            ? "Заметка будет удалена с этого устройства. Это действие нельзя отменить."
+            : confirmDeleteTrainingDay
+                ? "План и связь с будущими тренировками будут удалены. Даты останутся в календаре обычными делами, история сохранится."
+                : confirmDeleteRecurrence
+                    ? "Повтор и его исключения будут удалены. Уже созданные разовые дела останутся."
+                    : "Период отсутствия будет удалён. Повторы снова появятся в эти даты.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await PrivateSeed.ImportIfNeededAsync();
+        Refresh();
+        identityAuthorityDraft = Identity.IdentityAuthority;
+        lifeApiDraft = Identity.LifeApi;
+        learningApiDraft = Identity.LearningApi;
+        try { authSignedIn = await Identity.HasSessionAsync(); }
+        catch (Exception) { authMessage = "Не удалось прочитать сохранённую учётную сессию. Повторный вход может потребоваться."; }
+        backgroundSyncStatus = BackgroundSync.Status;
+        BackgroundSync.StatusChanged += OnBackgroundSyncStatusChanged;
+        ReloadSyncConflicts();
+        ReloadCachedLessons();
+        Reminders.StatusChanged += OnReminderStatusChanged;
+        try
+        {
+            reminderStatus = await Reminders.GetStatusAsync();
+            await Reminders.RebuildAsync();
+        }
+        catch (Exception)
+        {
+            reminderStatus = new ReminderStatus(false, false, "Не удалось проверить разрешения на уведомления.");
+        }
+    }
+
+    void ReloadCachedLessons()
+    {
+        var selectedId = activeLesson?.Id;
+        var selectedVersion = activeLesson?.Version;
+        availableLessons = Store.GetCachedLessons()
+            .Select(cached => Store.GetCachedLessonContent(cached.Id, cached.Version))
+            .Where(lesson => lesson is not null)
+            .Select(lesson => lesson!)
+            .OrderBy(lesson => lesson.Date < LocalStore.Today ? 1 : 0)
+            .ThenBy(lesson => Math.Abs(lesson.Date.DayNumber - LocalStore.Today.DayNumber))
+            .ThenBy(lesson => lesson.Version)
+            .ToList();
+        var selected = selectedId is { } id && selectedVersion is { } version
+            ? availableLessons.FirstOrDefault(lesson => lesson.Id == id && lesson.Version == version)
+            : null;
+        LoadLesson(selected ?? availableLessons.FirstOrDefault());
+    }
+
+    async Task SaveServerEndpoints()
+    {
+        authBusy = true;
+        try
+        {
+            await Identity.SaveEndpointsAsync(identityAuthorityDraft, lifeApiDraft, learningApiDraft);
+            identityAuthorityDraft = Identity.IdentityAuthority;
+            lifeApiDraft = Identity.LifeApi;
+            learningApiDraft = Identity.LearningApi;
+            authMessage = "Адреса сервисов сохранены на этом устройстве.";
+        }
+        catch (Exception ex) { authMessage = ex.Message; }
+        finally { authBusy = false; }
+    }
+
+    async Task ConnectAccount()
+    {
+        authBusy = true;
+        authMessage = null;
+        try
+        {
+            await Identity.SaveEndpointsAsync(identityAuthorityDraft, lifeApiDraft, learningApiDraft);
+            identityAuthorityDraft = Identity.IdentityAuthority;
+            lifeApiDraft = Identity.LifeApi;
+            learningApiDraft = Identity.LearningApi;
+            await Identity.SignInAsync();
+            authSignedIn = true;
+            if (tab == "learn") PersistLearningDrafts();
+            await SynchronizeAfterConnectAsync();
+        }
+        catch (TaskCanceledException) { authMessage = "Вход отменён. Локальные данные не затронуты."; }
+        catch (Exception ex) { authMessage = ex.Message; }
+        finally { authBusy = false; }
+    }
+
+    async Task SynchronizeNow()
+    {
+        authBusy = true;
+        authMessage = null;
+        if (tab == "learn") PersistLearningDrafts();
+        try { await SynchronizeAfterConnectAsync(); }
+        catch (Exception ex)
+        {
+            try { authSignedIn = await Identity.HasSessionAsync(); } catch (Exception) { authSignedIn = false; }
+            authMessage = ex.Message;
+        }
+        finally { authBusy = false; }
+    }
+
+    async Task RecoverSyncEpochs()
+    {
+        if (authBusy || backgroundSyncStatus.IsRunning) return;
+        authBusy = true;
+        authMessage = null;
+        if (tab == "learn") PersistLearningDrafts();
+        try
+        {
+            var result = await Synchronizer.RecoverEpochsAsync();
+            BackgroundSync.RecordSuccessfulSynchronization();
+            authMessage = $"Сверка завершена. Добавлено новых уроков: {result.LessonsAdded}. Проверьте новые конфликты в списке ниже.";
+        }
+        catch (Exception ex)
+        {
+            try { authSignedIn = await Identity.HasSessionAsync(); } catch (Exception) { authSignedIn = false; }
+            authMessage = "Сверка остановилась. Локальная очередь сохранена. " + ex.Message;
+        }
+        finally
+        {
+            authBusy = false;
+            Refresh();
+            ReloadCachedLessons();
+            ReloadSyncConflicts();
+            try { await Reminders.RebuildAsync(); } catch (Exception) { }
+        }
+    }
+
+    async Task SynchronizeAfterConnectAsync()
+    {
+        MobileSyncResult? result = null;
+        try
+        {
+            result = await Synchronizer.SynchronizeAsync();
+            BackgroundSync.RecordSuccessfulSynchronization();
+        }
+        finally
+        {
+            Refresh();
+            ReloadCachedLessons();
+            ReloadSyncConflicts();
+            try { await Reminders.RebuildAsync(); } catch (Exception) { }
+        }
+        authMessage = $"Синхронизация завершена. Добавлено новых уроков: {result!.LessonsAdded}.";
+    }
+
+    void ReloadSyncConflicts()
+    {
+        syncConflicts = Store.GetSyncConflictInbox();
+        if (selectedConflict is { } selected)
+        {
+            selectedConflict = syncConflicts.FirstOrDefault(item => item.Service == selected.Service && item.Id == selected.Id);
+            if (selectedConflict is null) conflictFields = [];
+        }
+    }
+
+    void OpenConflict(ClientSyncConflict conflict)
+    {
+        selectedConflict = conflict;
+        var baseline = ParseConflictObject(conflict.Base);
+        var server = ParseConflictObject(conflict.Server);
+        var localPatch = ParseConflictObject(conflict.Local);
+        var current = ParseConflictObject(Store.GetConflictCurrentBody(conflict));
+        if (conflict.Service == "learning")
+        {
+            server["LessonId"] = conflict.LessonId;
+            server["ContentVersion"] = conflict.ContentVersion;
+            current["LessonId"] = conflict.LessonId;
+            current["ContentVersion"] = conflict.ContentVersion;
+        }
+        else if (!server.ContainsKey("Id")) server["Id"] = conflict.EntityId;
+
+        conflictServerVersion = (JsonObject)server.DeepClone();
+        var localVersion = (JsonObject)server.DeepClone();
+        foreach (var pair in localPatch)
+        {
+            current.TryGetPropertyValue(pair.Key, out var currentValue);
+            baseline.TryGetPropertyValue(pair.Key, out var baseValue);
+            var selectedLocalValue = conflict.HasLocalMutation && currentValue is not null && !JsonNode.DeepEquals(currentValue, baseValue)
+                ? currentValue
+                : pair.Value;
+            localVersion[pair.Key] = selectedLocalValue?.DeepClone();
+        }
+        if (conflict.HasLocalMutation)
+        {
+            foreach (var pair in current)
+            {
+                baseline.TryGetPropertyValue(pair.Key, out var baseValue);
+                if (!JsonNode.DeepEquals(pair.Value, baseValue)) localVersion[pair.Key] = pair.Value?.DeepClone();
+            }
+        }
+        if (conflict.Service == "learning")
+        {
+            localVersion["LessonId"] = conflict.LessonId;
+            localVersion["ContentVersion"] = conflict.ContentVersion;
+        }
+        conflictLocalVersion = localVersion;
+        var keys = localPatch.Select(pair => pair.Key)
+            .Concat(conflict.HasLocalMutation
+                ? current.Where(pair => !JsonNode.DeepEquals(pair.Value, baseline[pair.Key])).Select(pair => pair.Key)
+                : [])
+            .Where(key => key is not ("Id" or "LessonId" or "ContentVersion"))
+            .Distinct(StringComparer.Ordinal);
+        conflictFields = [];
+        foreach (var key in keys)
+        {
+            current.TryGetPropertyValue(key, out var currentValue);
+            localPatch.TryGetPropertyValue(key, out var proposedValue);
+            server.TryGetPropertyValue(key, out var serverValue);
+            baseline.TryGetPropertyValue(key, out var baseValue);
+            var localValue = conflict.HasLocalMutation && currentValue is not null && !JsonNode.DeepEquals(currentValue, baseValue)
+                ? currentValue.DeepClone()
+                : proposedValue?.DeepClone();
+            if (JsonNode.DeepEquals(localValue, serverValue)) continue;
+            var editable = localValue is JsonValue localScalar && localScalar.TryGetValue<string>(out _) ||
+                           serverValue is JsonValue serverScalar && serverScalar.TryGetValue<string>(out _);
+            conflictFields.Add(new ConflictFieldDraft
+            {
+                Key = key,
+                Label = ConflictFieldLabel(key),
+                BaseText = FormatConflictValue(baseValue),
+                LocalText = FormatConflictValue(localValue),
+                ServerText = FormatConflictValue(serverValue),
+                LocalValue = localValue,
+                ServerValue = serverValue?.DeepClone(),
+                ManualValue = localValue is JsonValue textValue && textValue.TryGetValue<string>(out var text) ? text : string.Empty,
+                IsEditable = editable,
+                IsLongText = key is "Text" or "Answer" or "Notes" or "Evidence",
+                Choice = "server"
+            });
+        }
+    }
+
+    void ChooseConflictVersion(string choice)
+    {
+        foreach (var field in conflictFields) field.Choice = choice;
+    }
+
+    async Task ResolveSelectedConflict()
+    {
+        if (selectedConflict is not { } conflict || conflictServerVersion is not { } server || conflictFields.Count == 0)
+            return;
+        var merged = (JsonObject)server.DeepClone();
+        foreach (var field in conflictFields)
+        {
+            merged[field.Key] = field.Choice switch
+            {
+                "local" => field.LocalValue?.DeepClone(),
+                "manual" when field.IsEditable => JsonValue.Create(field.ManualValue),
+                _ => field.ServerValue?.DeepClone()
+            };
+        }
+        await SaveConflictResolutionAsync(conflict, merged, delete: false);
+    }
+
+    async Task ResolveConflictVersion(string source)
+    {
+        if (selectedConflict is not { } conflict) return;
+        var useServer = source == "server";
+        var delete = useServer ? conflict.ServerDeleted : conflict.LocalDeleted;
+        var version = useServer ? conflictServerVersion : conflictLocalVersion;
+        if (!delete && version is null)
+        {
+            authMessage = "Не удалось сформировать выбранную версию. Исходные данные сохранены.";
+            return;
+        }
+        await SaveConflictResolutionAsync(conflict, version, delete);
+    }
+
+    async Task SaveConflictResolutionAsync(ClientSyncConflict conflict, JsonObject? body, bool delete)
+    {
+        if (authBusy || BackgroundSync.Status.IsRunning)
+        {
+            authMessage = "Дождитесь завершения текущей синхронизации, затем сохраните решение.";
+            return;
+        }
+
+        authBusy = true;
+        try
+        {
+            Store.ResolveSyncConflict(conflict, body, delete);
+            selectedConflict = null;
+            conflictServerVersion = null;
+            conflictLocalVersion = null;
+            conflictFields = [];
+            Refresh();
+            ReloadSyncConflicts();
+            try
+            {
+                await SynchronizeAfterConnectAsync();
+                authMessage = "Решение передано на синхронизацию.";
+            }
+            catch (Exception ex)
+            {
+                authMessage = "Объединённый вариант сохранён на устройстве и будет отправлен позже. " + ex.Message;
+            }
+        }
+        catch (Exception ex) { authMessage = "Не удалось сохранить решение: " + ex.Message; }
+        finally { authBusy = false; }
+    }
+
+    void CloseConflict()
+    {
+        selectedConflict = null;
+        conflictServerVersion = null;
+        conflictLocalVersion = null;
+        conflictFields = [];
+    }
+
+    static string ConflictStateLabel(bool deleted) => deleted ? "оставить удалённым" : "сохранить редакцию";
+
+    string ConflictTitle(ClientSyncConflict conflict)
+    {
+        if (conflict.Service == "learning")
+        {
+            var lesson = availableLessons.FirstOrDefault(item => item.Id == conflict.LessonId && item.Version == conflict.ContentVersion);
+            return lesson is null ? "Ответ к уроку" : $"Ответ: {lesson.Title}";
+        }
+        var version = ParseConflictObject(conflict.Server);
+        if (!version.ContainsKey("Title")) version = ParseConflictObject(conflict.Local);
+        var titleValue = version["Title"]?.ToString();
+        return conflict.Kind switch
+        {
+            "PlanItem" => "Дело «" + (string.IsNullOrWhiteSpace(titleValue) ? "без названия" : titleValue) + "»",
+            "NoteItem" => "Текстовая запись",
+            "Recurrence" => "Правило повтора",
+            "Vacation" => "Период отсутствия",
+            "OccurrenceOverride" => "Вхождение повторяющегося дела",
+            "TrainingDay" => "План тренировки",
+            "TrainingLog" => "Запись тренировки",
+            _ => "Запись PersonalFlow"
+        };
+    }
+
+    static JsonObject ParseConflictObject(string? json) => string.IsNullOrWhiteSpace(json)
+        ? new JsonObject()
+        : JsonNode.Parse(json) as JsonObject ?? new JsonObject();
+
+    static string FormatConflictValue(JsonNode? value)
+    {
+        if (value is null) return "—";
+        if (value is JsonValue scalar && scalar.TryGetValue<string>(out var text))
+            return string.IsNullOrEmpty(text) ? "Пусто" : text;
+        if (value is JsonArray array) return array.Count == 0 ? "Пусто" : string.Join(", ", array.Select(FormatConflictValue));
+        return value.ToJsonString();
+    }
+
+    static string ConflictFieldLabel(string field) => field switch
+    {
+        "Title" => "Название",
+        "Text" => "Текст",
+        "Date" or "StartsOn" or "EndsOn" or "Start" or "End" or "MovedTo" => "Дата",
+        "Time" => "Время",
+        "Done" => "Выполнение",
+        "Pinned" => "Закрепление",
+        "Frequency" => "Частота",
+        "Interval" => "Интервал",
+        "Weekdays" => "Дни недели",
+        "MonthDays" => "Дни месяца",
+        "ExclusionCategory" or "Category" => "Категория",
+        "Answer" => "Ответ",
+        "Notes" => "Заметки",
+        "Evidence" => "Подтверждение",
+        "Status" => "Статус обучения",
+        "ViewedAt" => "Время просмотра",
+        _ => field
+    };
+
+    async Task SignOut()
+    {
+        authBusy = true;
+        try
+        {
+            var remoteRevoked = await Identity.SignOutAsync();
+            authSignedIn = false;
+            authMessage = remoteRevoked
+                ? "Выход выполнен; токен на устройстве удалён."
+                : "Локальный выход выполнен. Серверную сессию не удалось отозвать; при необходимости отзовите устройство на сервере.";
+        }
+        catch (Exception ex)
+        {
+            try { authSignedIn = await Identity.HasSessionAsync(); }
+            catch (Exception) { authSignedIn = false; }
+            authMessage = "Не удалось завершить выход: " + ex.Message;
+        }
+        finally { authBusy = false; }
+    }
+
+    void OnReminderStatusChanged(ReminderStatus status) => _ = InvokeAsync(() =>
+    {
+        reminderStatus = status;
+        StateHasChanged();
+    });
+
+    void OnBackgroundSyncStatusChanged(MobileBackgroundSyncStatus status) => _ = InvokeAsync(() =>
+    {
+        backgroundSyncStatus = status;
+        Refresh();
+        ReloadCachedLessons();
+        ReloadSyncConflicts();
+        StateHasChanged();
+    });
+
+    async Task EnableReminders()
+    {
+        reminderRequesting = true;
+        try { reminderStatus = await Reminders.RequestAccessAsync(); }
+        catch (Exception) { ShowMessage("Не удалось открыть настройки уведомлений"); }
+        finally { reminderRequesting = false; }
+    }
+
+    void RebuildReminders() => _ = RebuildRemindersAsync();
+
+    async Task RebuildRemindersAsync()
+    {
+        try { await Reminders.RebuildAsync(); }
+        catch (Exception) { /* Keep task editing available if the OS rejects a schedule update. */ }
+    }
+
+    void Refresh()
+    {
+        plans = Store.All<PlanItem>();
+        notes = Store.All<NoteItem>();
+        training = Store.All<TrainingDay>();
+        logs = Store.All<TrainingLog>();
+        recurrences = Store.All<Recurrence>();
+        vacations = Store.All<Vacation>();
+        occurrenceOverrides = Store.All<OccurrenceOverride>();
+    }
+
+    int CountTasksOn(DateOnly date) => EntriesFor(date, date).Count();
+
+    IEnumerable<PlannedEntry> EntriesFor(DateOnly from, DateOnly through)
+    {
+        var manual = plans.Where(x => x.Date >= from && x.Date <= through)
+            .Select(x => new PlannedEntry(x.Id, x.Title, x.Date, x.Done, x.Time, WorkoutDayId: x.WorkoutDayId));
+        var repeated = RecurrenceProjection.Expand(from, through, recurrences, vacations, occurrenceOverrides);
+        return manual.Concat(repeated)
+            .Select(item => item.WorkoutDayId is not null && logs.Any(log => log.Id == item.Id && log.Finished)
+                ? item with { Done = true }
+                : item)
+            .OrderBy(x => x.Date).ThenBy(x => x.Time ?? "99:99", StringComparer.Ordinal).ThenBy(x => x.Title, StringComparer.CurrentCulture);
+    }
+
+    IEnumerable<DateOnly> WeekDays()
+    {
+        var monday = selectedDate.AddDays(-(((int)selectedDate.DayOfWeek + 6) % 7));
+        return Enumerable.Range(0, 7).Select(monday.AddDays);
+    }
+
+    IEnumerable<DateOnly> MonthDays()
+    {
+        var first = new DateOnly(selectedDate.Year, selectedDate.Month, 1);
+        var start = first.AddDays(-(((int)first.DayOfWeek + 6) % 7));
+        return Enumerable.Range(0, 42).Select(start.AddDays);
+    }
+
+    string AccessibleDate(DateOnly date) => date.ToString("dddd, d MMMM", culture);
+    void SelectDate(DateOnly date) { selectedDate = date; DismissMessage(); }
+    void GoToday() { selectedDate = LocalStore.Today; DismissMessage(); }
+    void ShiftPeriod(int direction) => selectedDate = monthView ? selectedDate.AddMonths(direction) : selectedDate.AddDays(direction * 7);
+    void Navigate(string key)
+    {
+        if (tab == "learn") PersistLearningDrafts();
+        tab = key;
+        DismissMessage();
+    }
+
+    void ShowMessage(string text)
+    {
+        message = text;
+        messageTimer?.Dispose();
+        messageTimer = new Timer(_ => _ = InvokeAsync(() =>
+        {
+            message = null;
+            StateHasChanged();
+        }), null, 2600, Timeout.Infinite);
+    }
+
+    void DismissMessage()
+    {
+        message = null;
+        messageTimer?.Dispose();
+        messageTimer = null;
+    }
+
+    void SetEditDate(ChangeEventArgs args)
+    {
+        if (DateOnly.TryParseExact(args.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            editDate = date.ToDateTime(TimeOnly.MinValue);
+    }
+
+    void SetMoveDate(ChangeEventArgs args)
+    {
+        if (DateOnly.TryParseExact(args.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            moveDate = date.ToDateTime(TimeOnly.MinValue);
+    }
+
+    static bool TryReadDate(ChangeEventArgs args, out DateTime value)
+    {
+        value = default;
+        if (!DateOnly.TryParseExact(args.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) return false;
+        value = date.ToDateTime(TimeOnly.MinValue);
+        return true;
+    }
+
+    void SetRecurrenceStartDate(ChangeEventArgs args) { if (TryReadDate(args, out var value)) recurrenceStart = value; }
+    void SetRecurrenceEndDate(ChangeEventArgs args) { if (TryReadDate(args, out var value)) recurrenceEnd = value; }
+    void SetVacationStartDate(ChangeEventArgs args) { if (TryReadDate(args, out var value)) vacationStart = value; }
+    void SetVacationEndDate(ChangeEventArgs args) { if (TryReadDate(args, out var value)) vacationEnd = value; }
+    void SetWorkoutScheduleStart(ChangeEventArgs args) { if (TryReadDate(args, out var value)) workoutScheduleStart = value; }
+    void SetWorkoutScheduleEnd(ChangeEventArgs args) { if (TryReadDate(args, out var value)) workoutScheduleEnd = value; }
+    void SetWorkoutScheduleTime(ChangeEventArgs args) => workoutScheduleTime = args.Value?.ToString() ?? string.Empty;
+
+    void SetTime(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString() ?? string.Empty;
+        time = TimeOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : value;
+    }
+
+    void SetRecurrenceTime(ChangeEventArgs args) => recurrenceTime = NormalizeTime(args.Value?.ToString() ?? string.Empty) ?? string.Empty;
+
+    void AddAt(DateOnly date)
+    {
+        CloseSheets(); taskId = null; title = ""; time = ""; editDate = date.ToDateTime(TimeOnly.MinValue); taskEditor = true;
+    }
+
+    void Edit(PlannedEntry item)
+    {
+        if (item.SeriesId is { } seriesId) { EditRecurrence(seriesId); return; }
+        CloseSheets(); taskId = item.Id; title = item.Title; time = FormatTaskTime(item.Time ?? "");
+        editDate = item.Date.ToDateTime(TimeOnly.MinValue); taskEditor = true;
+    }
+
+    void SaveTask()
+    {
+        if (string.IsNullOrWhiteSpace(title)) return;
+        var id = taskId ?? Guid.NewGuid();
+        var done = plans.FirstOrDefault(x => x.Id == id)?.Done ?? false;
+        var date = DateOnly.FromDateTime(editDate);
+        var workoutId = plans.FirstOrDefault(x => x.Id == id)?.WorkoutDayId;
+        Store.Save(id, new PlanItem(id, title.Trim(), date, done, string.IsNullOrWhiteSpace(time) ? null : time, workoutId));
+        selectedDate = date; Refresh(); CloseSheets(); ShowMessage("Дело сохранено на устройстве");
+        RebuildReminders();
+    }
+
+    void Toggle(PlannedEntry item)
+    {
+        if (item.SeriesId is { } seriesId && item.OriginalDate is { } originalDate)
+        {
+            var previous = occurrenceOverrides.FirstOrDefault(x => x.SeriesId == seriesId && x.OriginalDate == originalDate);
+            Store.Save(item.Id, new OccurrenceOverride(item.Id, seriesId, originalDate,
+                previous?.MovedTo, !item.Done, previous?.Skipped ?? false));
+        }
+        else Store.Save(item.Id, new PlanItem(item.Id, item.Title, item.Date, !item.Done, item.Time, item.WorkoutDayId));
+        Refresh();
+        RebuildReminders();
+    }
+
+    void OpenMove(PlannedEntry item)
+    {
+        CloseSheets(); taskId = item.Id; moveSeriesId = item.SeriesId; moveOriginalDate = item.OriginalDate;
+        moveTitle = item.Title; moveDate = item.Date.ToDateTime(TimeOnly.MinValue); moveEditor = true;
+    }
+
+    void SaveMove()
+    {
+        if (taskId is not { } id) return;
+        var destination = DateOnly.FromDateTime(moveDate);
+        if (moveSeriesId is { } seriesId && moveOriginalDate is { } originalDate)
+        {
+            var existing = occurrenceOverrides.FirstOrDefault(x => x.SeriesId == seriesId && x.OriginalDate == originalDate);
+            DateOnly? movedTo = destination == originalDate ? null : destination;
+            if (movedTo is null && existing?.Done is null && existing?.Skipped != true)
+                Store.Delete<OccurrenceOverride>(id);
+            else
+                Store.Save(id, new OccurrenceOverride(id, seriesId, originalDate, movedTo, existing?.Done, existing?.Skipped ?? false));
+        }
+        else
+        {
+            var item = plans.FirstOrDefault(x => x.Id == id);
+            if (item is null) { CloseSheets(); Refresh(); return; }
+            Store.Save(item.Id, item with { Date = destination });
+        }
+        selectedDate = destination; Refresh(); CloseSheets(); ShowMessage("Дело перенесено"); RebuildReminders();
+    }
+
+    void SkipOccurrence(PlannedEntry item)
+    {
+        if (item.SeriesId is not { } seriesId || item.OriginalDate is not { } originalDate) return;
+        var existing = occurrenceOverrides.FirstOrDefault(x => x.SeriesId == seriesId && x.OriginalDate == originalDate);
+        Store.Save(item.Id, new OccurrenceOverride(item.Id, seriesId, originalDate, existing?.MovedTo, existing?.Done, true));
+        Refresh(); ShowMessage("Это вхождение пропущено"); RebuildReminders();
+    }
+
+    void DeleteTask()
+    {
+        if (taskId is { } id) Store.Delete<PlanItem>(id);
+        confirmDeleteTask = false; CloseSheets(); Refresh(); ShowMessage("Дело удалено"); RebuildReminders();
+    }
+
+    void OpenRecurrenceManager()
+    {
+        CloseSheets(); recurrenceManager = true;
+    }
+
+    void NewRecurrence()
+    {
+        recurrenceId = null; recurrenceTitle = string.Empty; recurrenceTime = string.Empty;
+        recurrenceStart = selectedDate.ToDateTime(TimeOnly.MinValue); recurrenceEnd = recurrenceStart.AddYears(1);
+        recurrenceHasEnd = false; recurrencePattern = "weekly"; recurrenceInterval = 1;
+        recurrenceWeekdays = [selectedDate.DayOfWeek]; recurrenceMonthDay = selectedDate.Day;
+        recurrenceCategory = string.Empty; recurrenceWorkoutDayId = null; recurrenceManager = false; recurrenceEditor = true;
+    }
+
+    void EditRecurrence(Guid id)
+    {
+        var series = recurrences.FirstOrDefault(x => x.Id == id);
+        if (series is null) { Refresh(); return; }
+        recurrenceId = id; recurrenceTitle = series.Title; recurrenceTime = FormatTaskTime(series.Time ?? string.Empty); recurrenceWorkoutDayId = series.WorkoutDayId;
+        recurrenceStart = series.StartsOn.ToDateTime(TimeOnly.MinValue); recurrenceHasEnd = series.EndsOn is not null;
+        recurrenceEnd = (series.EndsOn ?? series.StartsOn.AddYears(1)).ToDateTime(TimeOnly.MinValue);
+        recurrenceInterval = series.Interval; recurrenceWeekdays = series.Weekdays.ToHashSet();
+        recurrenceMonthDay = series.MonthDays.FirstOrDefault(series.StartsOn.Day); recurrenceCategory = series.ExclusionCategory ?? string.Empty;
+        recurrencePattern = series.Frequency switch
+        {
+            RecurrenceFrequency.Daily => "daily",
+            RecurrenceFrequency.Monthly => "monthly",
+            RecurrenceFrequency.Weekly when recurrenceWeekdays.SetEquals([DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday]) => "weekdays",
+            RecurrenceFrequency.Weekly when recurrenceWeekdays.SetEquals([DayOfWeek.Saturday, DayOfWeek.Sunday]) => "weekends",
+            _ => "weekly"
+        };
+        recurrenceManager = false; recurrenceEditor = true;
+    }
+
+    void SetRecurrencePattern(ChangeEventArgs e)
+    {
+        recurrencePattern = e.Value?.ToString() ?? "weekly";
+        if (recurrencePattern == "weekdays") recurrenceWeekdays = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday];
+        else if (recurrencePattern == "weekends") recurrenceWeekdays = [DayOfWeek.Saturday, DayOfWeek.Sunday];
+        else if (recurrencePattern == "weekly" && recurrenceWeekdays.Count == 0) recurrenceWeekdays = [DateOnly.FromDateTime(recurrenceStart).DayOfWeek];
+        else if (recurrencePattern == "monthly") recurrenceMonthDay = DateOnly.FromDateTime(recurrenceStart).Day;
+    }
+
+    void SetRecurrenceInterval(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+            recurrenceInterval = Math.Clamp(value, 1, 365);
+    }
+
+    void SetMonthDay(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+            recurrenceMonthDay = Math.Clamp(value, 1, 31);
+    }
+
+    void ToggleWeekday(DayOfWeek day)
+    {
+        if (!recurrenceWeekdays.Add(day)) recurrenceWeekdays.Remove(day);
+    }
+
+    RecurrenceRule BuildRecurrenceRule()
+    {
+        var frequency = recurrencePattern == "daily" ? RecurrenceFrequency.Daily
+            : recurrencePattern == "monthly" ? RecurrenceFrequency.Monthly : RecurrenceFrequency.Weekly;
+        var weekdays = frequency == RecurrenceFrequency.Weekly ? recurrenceWeekdays.ToHashSet() : new HashSet<DayOfWeek>();
+        var monthDays = frequency == RecurrenceFrequency.Monthly ? new HashSet<int> { recurrenceMonthDay } : new HashSet<int>();
+        return new RecurrenceRule(DateOnly.FromDateTime(recurrenceStart), frequency, recurrenceInterval,
+            weekdays, monthDays, recurrenceHasEnd ? DateOnly.FromDateTime(recurrenceEnd) : null,
+            string.IsNullOrWhiteSpace(recurrenceCategory) ? null : recurrenceCategory);
+    }
+
+    IReadOnlyList<DateOnly> RecurrencePreview()
+    {
+        try
+        {
+            var rule = BuildRecurrenceRule();
+            var end = DateOnly.FromDateTime(recurrenceStart).AddMonths(6);
+            if (rule.EndsOn is { } endsOn && endsOn < end) end = endsOn;
+            var exclusions = vacations.Select(x => new DateExclusion(x.Start, x.End, x.Category));
+            return rule.Expand(rule.StartsOn, end, exclusions).Take(3).ToArray();
+        }
+        catch (ArgumentException) { return []; }
+    }
+
+    string RecurrenceSummary(Recurrence series)
+    {
+        var frequency = series.Frequency switch
+        {
+            RecurrenceFrequency.Daily => "ежедневно",
+            RecurrenceFrequency.Monthly => $"ежемесячно · {string.Join(", ", series.MonthDays)}-е число",
+            _ when series.Weekdays.ToHashSet().SetEquals([DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday]) => "по будням",
+            _ when series.Weekdays.ToHashSet().SetEquals([DayOfWeek.Saturday, DayOfWeek.Sunday]) => "по выходным",
+            _ => string.Join(", ", series.Weekdays.Order().Select(WeekdayName))
+        };
+        return series.Interval == 1 ? frequency : $"каждые {series.Interval}: {frequency}";
+    }
+
+    string WeekdayName(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday => "Пн", DayOfWeek.Tuesday => "Вт", DayOfWeek.Wednesday => "Ср",
+        DayOfWeek.Thursday => "Чт", DayOfWeek.Friday => "Пт", DayOfWeek.Saturday => "Сб", _ => "Вс"
+    };
+
+    void SaveRecurrence()
+    {
+        if (string.IsNullOrWhiteSpace(recurrenceTitle)) { ShowMessage("Укажите название повтора"); return; }
+        var id = recurrenceId ?? Guid.NewGuid();
+        try
+        {
+            var rule = BuildRecurrenceRule();
+            rule.Validate();
+            if (!string.IsNullOrWhiteSpace(recurrenceCategory) && !vacations.Any(x => x.Category == recurrenceCategory))
+            { ShowMessage("Сначала добавьте отпуск с выбранной категорией"); return; }
+            var series = new Recurrence(id, id, recurrenceTitle.Trim(), NormalizeTime(recurrenceTime),
+                rule.StartsOn, rule.Frequency, rule.Interval, rule.Weekdays.Order().ToArray(), rule.MonthDays.Order().ToArray(),
+                rule.EndsOn, rule.ExclusionCategory, recurrenceWorkoutDayId);
+            Store.Save(id, series); selectedDate = rule.StartsOn; Refresh(); recurrenceEditor = false; ShowMessage("Повтор сохранён"); RebuildReminders();
+        }
+        catch (ArgumentException)
+        {
+            ShowMessage("Проверьте период и выбранные дни повтора");
+        }
+    }
+
+    string? NormalizeTime(string value) => string.IsNullOrWhiteSpace(value) ? null
+        : TimeOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed.ToString("HH:mm", CultureInfo.InvariantCulture) : null;
+
+    void AskDeleteRecurrence() => confirmDeleteRecurrence = true;
+
+    void DeleteRecurrence()
+    {
+        if (recurrenceId is not { } id) { confirmDeleteRecurrence = false; return; }
+        foreach (var item in occurrenceOverrides.Where(x => x.SeriesId == id)) Store.Delete<OccurrenceOverride>(item.Id);
+        Store.Delete<Recurrence>(id); confirmDeleteRecurrence = false; recurrenceEditor = false; Refresh(); ShowMessage("Повтор удалён"); RebuildReminders();
+    }
+
+    void OpenVacationManager()
+    {
+        CloseSheets(); vacationManager = true; vacationFormOpen = false; vacationId = null;
+    }
+
+    void NewVacation()
+    {
+        vacationId = null; vacationCategory = string.Empty; vacationTitle = string.Empty;
+        vacationStart = selectedDate.ToDateTime(TimeOnly.MinValue); vacationEnd = vacationStart;
+        vacationFormOpen = true;
+    }
+
+    void EditVacation(Vacation vacation)
+    {
+        vacationId = vacation.Id; vacationCategory = vacation.Category; vacationTitle = vacation.Title;
+        vacationStart = vacation.Start.ToDateTime(TimeOnly.MinValue); vacationEnd = vacation.End.ToDateTime(TimeOnly.MinValue);
+        vacationFormOpen = true;
+    }
+
+    void CancelVacationEdit()
+    {
+        vacationId = null; vacationFormOpen = false;
+    }
+
+    void SaveVacation()
+    {
+        if (string.IsNullOrWhiteSpace(vacationCategory)) { ShowMessage("Укажите категорию отпуска"); return; }
+        var start = DateOnly.FromDateTime(vacationStart); var end = DateOnly.FromDateTime(vacationEnd);
+        if (end < start) { ShowMessage("Дата окончания должна быть не раньше начала"); return; }
+        var id = vacationId ?? Guid.NewGuid();
+        Store.Save(id, new Vacation(id, vacationCategory.Trim(), start, end,
+            string.IsNullOrWhiteSpace(vacationTitle) ? vacationCategory.Trim() : vacationTitle.Trim()));
+        vacationId = null; Refresh(); vacationFormOpen = false; ShowMessage("Период отсутствия сохранён"); RebuildReminders();
+    }
+
+    void AskDeleteVacation(Vacation vacation)
+    {
+        pendingVacationId = vacation.Id; confirmDeleteVacation = true;
+    }
+
+    void DeleteVacation()
+    {
+        if (pendingVacationId is { } id)
+        {
+            Store.Delete<Vacation>(id);
+            if (vacationId == id) CancelVacationEdit();
+        }
+        pendingVacationId = null; confirmDeleteVacation = false; Refresh(); ShowMessage("Период отсутствия удалён"); RebuildReminders();
+    }
+
+    void NewNote()
+    {
+        CloseSheets(); noteId = null; noteText = ""; noteEditor = true;
+    }
+
+    void EditNote(NoteItem note)
+    {
+        CloseSheets(); noteId = note.Id; noteText = note.Text; noteEditor = true;
+    }
+
+    void SaveNote()
+    {
+        if (string.IsNullOrWhiteSpace(noteText)) return;
+        var old = notes.FirstOrDefault(x => x.Id == noteId);
+        var id = noteId ?? Guid.NewGuid();
+        Store.Save(id, new NoteItem(id, noteText.Trim(), old?.Created ?? DateTimeOffset.UtcNow, old?.Pinned ?? false));
+        Refresh(); CloseSheets(); ShowMessage("Заметка сохранена на устройстве");
+    }
+
+    void Pin(NoteItem note)
+    {
+        Store.Save(note.Id, note with { Pinned = !note.Pinned }); Refresh();
+        ShowMessage(note.Pinned ? "Заметка откреплена" : "Заметка закреплена");
+    }
+
+    void AskDeleteNote(NoteItem note)
+    {
+        pendingDeleteNoteId = note.Id; confirmDeleteNote = true;
+    }
+
+    void SelectLesson(Guid lessonId, int version)
+    {
+        if (activeLesson is { } current && current.Id == lessonId && current.Version == version) return;
+        PersistLearningDrafts();
+        LoadLesson(Store.GetCachedLessonContent(lessonId, version));
+    }
+
+    void LoadLesson(LearningLessonContent? lesson)
+    {
+        activeLesson = lesson;
+        var lessonId = lesson?.Id ?? LessonId;
+        var version = lesson?.Version ?? 1;
+        learningProgress = Store.GetLearningProgress(lessonId, version);
+        answerDraft = learningProgress.Answer;
+        notesDraft = learningProgress.Notes;
+        evidenceDraft = learningProgress.Evidence;
+    }
+
+    async Task SaveAnswer(ChangeEventArgs e) => await DebounceLearningSave(e, value => answerDraft = value);
+    async Task SaveNotes(ChangeEventArgs e) => await DebounceLearningSave(e, value => notesDraft = value);
+    async Task SaveEvidence(ChangeEventArgs e) => await DebounceLearningSave(e, value => evidenceDraft = value);
+
+    async Task DebounceLearningSave(ChangeEventArgs e, Action<string> updateDraft)
+    {
+        updateDraft(e.Value?.ToString() ?? string.Empty);
+        answerSaveCancellation?.Cancel();
+        answerSaveCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        answerSaveCancellation = cancellation;
+        try
+        {
+            await Task.Delay(450, cancellation.Token);
+            if (ReferenceEquals(answerSaveCancellation, cancellation))
+                await InvokeAsync(PersistLearningDrafts);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(answerSaveCancellation, cancellation))
+            {
+                answerSaveCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    void CommitAnswer(ChangeEventArgs e) => CommitLearningDraft(e, value => answerDraft = value);
+    void CommitNotes(ChangeEventArgs e) => CommitLearningDraft(e, value => notesDraft = value);
+    void CommitEvidence(ChangeEventArgs e) => CommitLearningDraft(e, value => evidenceDraft = value);
+
+    void CommitLearningDraft(ChangeEventArgs e, Action<string> updateDraft)
+    {
+        updateDraft(e.Value?.ToString() ?? string.Empty);
+        PersistLearningDrafts();
+    }
+
+    void PersistLearningDrafts()
+    {
+        answerSaveCancellation?.Cancel();
+        answerSaveCancellation?.Dispose();
+        answerSaveCancellation = null;
+        if (learningProgress.Answer == answerDraft && learningProgress.Notes == notesDraft && learningProgress.Evidence == evidenceDraft) return;
+        learningProgress = learningProgress with { Answer = answerDraft, Notes = notesDraft, Evidence = evidenceDraft };
+        Store.SaveLearningProgress(learningProgress);
+    }
+
+    void ReadLesson(ChangeEventArgs e)
+    {
+        PersistLearningDrafts();
+        var isRead = e.Value is bool value && value;
+        learningProgress = learningProgress with
+        {
+            Status = isRead ? "Read" : "InProgress",
+            ViewedAt = isRead ? learningProgress.ViewedAt ?? DateTimeOffset.UtcNow : learningProgress.ViewedAt
+        };
+        Store.SaveLearningProgress(learningProgress);
+    }
+
+
+    async Task OpenSource(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+            await Launcher.Default.OpenAsync(uri);
+        else
+            ShowMessage("Ссылка на источник недействительна");
+    }
+
+    void CopyLesson()
+    {
+        PersistLearningDrafts();
+        shareText = $"Обсудим урок «{LessonTitle}» (версия {learningProgress.ContentVersion}).\n\n" +
+            $"Первоисточники:\n{string.Join("\n", CurrentLessonSources.Select(source => $"- {source.Title}: {source.Url}"))}\n\n" +
+            $"Моё объяснение:\n{learningProgress.Answer}\n\nЗаметки:\n{learningProgress.Notes}\n\n" +
+            $"Свидетельство понимания:\n{learningProgress.Evidence}\n\nПроверь понимание, укажи сильные стороны и пробелы, затем задай один уточняющий вопрос.";
+    }
+
+    async Task CopyPackage()
+    {
+        if (shareText is null) return;
+        await Clipboard.Default.SetTextAsync(shareText); ShowMessage("Пакет скопирован");
+    }
+
+    async Task SharePackage()
+    {
+        if (shareText is null) return;
+        await Share.Default.RequestAsync(new ShareTextRequest { Text = shareText, Title = "Обсудить урок PersonalFlow" });
+    }
+
+    void OpenWorkoutSchedule(TrainingDay day)
+    {
+        CloseSheets();
+        workoutScheduleDayId = day.Id;
+        workoutScheduleName = day.Name;
+        workoutScheduleMode = "once";
+        workoutScheduleStart = selectedDate.ToDateTime(TimeOnly.MinValue);
+        workoutScheduleEnd = selectedDate.AddMonths(3).ToDateTime(TimeOnly.MinValue);
+        workoutScheduleInterval = 1;
+        workoutScheduleWeekdays = [selectedDate.DayOfWeek];
+        workoutScheduleHasEnd = false;
+        workoutScheduleTime = string.Empty;
+        workoutScheduleCategory = string.Empty;
+        workoutScheduleEditor = true;
+    }
+
+    void ToggleWorkoutScheduleWeekday(DayOfWeek day)
+    {
+        if (!workoutScheduleWeekdays.Add(day)) workoutScheduleWeekdays.Remove(day);
+    }
+
+    void SaveWorkoutSchedule()
+    {
+        if (workoutScheduleDayId is not { } workoutId || training.All(day => day.Id != workoutId))
+        { CloseSheets(); Refresh(); return; }
+        var begins = DateOnly.FromDateTime(workoutScheduleStart);
+        var normalizedTime = NormalizeTime(workoutScheduleTime);
+        if (!string.IsNullOrWhiteSpace(workoutScheduleTime) && normalizedTime is null)
+        { ShowMessage("Проверьте время начала"); return; }
+        if (workoutScheduleMode == "weekly")
+        {
+            if (workoutScheduleInterval is < 1 or > 52)
+            { ShowMessage("Интервал должен быть от 1 до 52 недель"); return; }
+            if (workoutScheduleWeekdays.Count == 0)
+            { ShowMessage("Выберите хотя бы один день недели"); return; }
+            DateOnly? ends = workoutScheduleHasEnd ? DateOnly.FromDateTime(workoutScheduleEnd) : null;
+            if (ends < begins) { ShowMessage("Дата окончания должна быть не раньше начала"); return; }
+            var series = new Recurrence(Guid.NewGuid(), Guid.NewGuid(), $"Тренировка · {workoutScheduleName}", normalizedTime,
+                begins, RecurrenceFrequency.Weekly, workoutScheduleInterval,
+                workoutScheduleWeekdays.OrderBy(day => ((int)day + 6) % 7).ToArray(), [], ends,
+                string.IsNullOrWhiteSpace(workoutScheduleCategory) ? null : workoutScheduleCategory,
+                workoutId);
+            Store.Save(series.Id, series);
+        }
+        else
+        {
+            var id = Guid.NewGuid();
+            Store.Save(id, new PlanItem(id, $"Тренировка · {workoutScheduleName}", begins, false, normalizedTime, workoutId));
+        }
+        selectedDate = begins;
+        Refresh(); CloseSheets(); ShowMessage("Тренировка добавлена в план"); RebuildReminders();
+    }
+
+    void NewTrainingDay()
+    {
+        CloseSheets(); dayId = null; dayName = ""; exerciseDrafts = []; trainingEditor = true;
+    }
+
+    void EditDay(TrainingDay day)
+    {
+        CloseSheets(); dayId = day.Id; dayName = day.Name;
+        exerciseDrafts = WorkoutDocuments.ToDrafts(WorkoutDocuments.ReadPlan(day.Id, day.Name, day.Exercises));
+        trainingEditor = true;
+    }
+
+    void SaveDay()
+    {
+        var id = dayId ?? Guid.NewGuid();
+        if (!WorkoutDocuments.TryBuildTemplate(id, dayName, exerciseDrafts, out var template, out var error))
+        { ShowMessage(error); return; }
+        Store.Save(id, new TrainingDay(id, template!.Name, WorkoutDocuments.WritePlan(template)));
+        Refresh(); CloseSheets(); ShowMessage("План тренировки сохранён");
+    }
+
+    void AddExercise() => exerciseDrafts.Add(new WorkoutExerciseDraft { Name = "", Sets = [new WorkoutSetDraft()] });
+
+    void RemoveExercise(WorkoutExerciseDraft exercise) => exerciseDrafts.Remove(exercise);
+
+    void MoveExercise(WorkoutExerciseDraft exercise, int direction)
+    {
+        var index = exerciseDrafts.IndexOf(exercise); var target = index + direction;
+        if (index < 0 || target < 0 || target >= exerciseDrafts.Count) return;
+        exerciseDrafts.RemoveAt(index); exerciseDrafts.Insert(target, exercise);
+    }
+
+    void AddSet(WorkoutExerciseDraft exercise)
+    {
+        var previous = exercise.Sets.LastOrDefault();
+        exercise.Sets.Add(previous is null
+            ? new WorkoutSetDraft()
+            : new WorkoutSetDraft { Repetitions = previous.Repetitions, Load = previous.Load, Unit = previous.Unit });
+    }
+
+    void RemoveSet(WorkoutExerciseDraft exercise, WorkoutSetDraft set)
+    {
+        if (exercise.Sets.Count > 1) exercise.Sets.Remove(set);
+    }
+
+    static void UpdateDraftSet(WorkoutSetDraft set, char field, ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        if (field == 'r') set.Repetitions = value;
+        else if (field == 'l') set.Load = value;
+        else set.Unit = value;
+    }
+
+    void AskDeleteTrainingDay() => confirmDeleteTrainingDay = true;
+
+    void DeleteTrainingDay()
+    {
+        if (dayId is not { } id) { CloseSheets(); return; }
+        if (logs.Any(x => x.DayId == id && !x.Finished))
+        {
+            confirmDeleteTrainingDay = false; ShowMessage("Сначала завершите тренировку по этому плану"); return;
+        }
+        Store.DeleteWorkoutTemplate(id); Refresh(); CloseSheets(); ShowMessage("План удалён. Календарные дела и история сохранены");
+    }
+
+    void Start(TrainingDay day)
+    {
+        Start(day, Guid.NewGuid(), null, null, null);
+    }
+
+    void StartScheduled(PlannedEntry item)
+    {
+        if (item.WorkoutDayId is not { } workoutId) return;
+        var existing = ScheduledLog(item);
+        tab = "workouts";
+        if (existing?.Finished == true) { ShowMessage("Результат этой тренировки уже сохранён"); return; }
+        if (ActiveLogs.Any(log => log.Id != item.Id)) { ShowMessage("Сначала завершите текущее занятие"); return; }
+        var day = training.FirstOrDefault(candidate => candidate.Id == workoutId);
+        if (day is null) { ShowMessage("План тренировки больше не найден"); return; }
+        Start(day, item.Id, item.SeriesId is null ? item.Id : null, item.SeriesId, item.OriginalDate);
+    }
+
+    void Start(TrainingDay day, Guid id, Guid? scheduleItemId, Guid? scheduleSeriesId, DateOnly? originalDate)
+    {
+        if (ActiveLogs.Any(log => log.Id != id)) { ShowMessage("Сначала завершите текущую тренировку"); return; }
+        if (ActiveLogs.Any(log => log.Id == id)) { tab = "workouts"; return; }
+        var template = WorkoutDocuments.ReadPlan(day.Id, day.Name, day.Exercises);
+        if (template.Exercises.Count == 0) { ShowMessage("Добавьте упражнения в план"); return; }
+        Store.Save(id, new TrainingLog(id, day.Id, day.Name, WorkoutDocuments.WritePlan(template), DateTimeOffset.UtcNow,
+            WorkoutDocuments.WriteLog(new WorkoutLogDocument(1, [], string.Empty)),
+            ScheduleItemId: scheduleItemId, ScheduleSeriesId: scheduleSeriesId, ScheduleOriginalDate: originalDate));
+        Refresh(); tab = "workouts"; ShowMessage("Тренировка началась");
+    }
+
+    string ResultRepetitions(SetResult? result) => result?.Repetitions?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    string ResultLoad(SetResult? result) => result?.Load?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+
+    string FormatTargets(ExerciseTemplate exercise)
+    {
+        if (exercise.Sets.Count == 0) return "Цели не заданы";
+        var first = exercise.Sets[0];
+        var repeated = exercise.Sets.All(x => x.Repetitions == first.Repetitions && x.Load == first.Load && x.Unit == first.Unit && x.Note == first.Note);
+        return repeated ? $"{exercise.Sets.Count} × {WorkoutDocuments.FormatTarget(first)}"
+            : string.Join(" / ", exercise.Sets.Select(WorkoutDocuments.FormatTarget));
+    }
+
+    string FormatWorkoutLog(TrainingLog log)
+    {
+        var template = WorkoutDocuments.ReadPlan(log.DayId, log.Name, log.Snapshot);
+        var recorded = WorkoutDocuments.ReadLog(log.Results);
+        var lines = new List<string>();
+        foreach (var exercise in template.Exercises)
+        {
+            if (!string.IsNullOrWhiteSpace(exercise.Note)) lines.Add($"{exercise.Name} · {exercise.Note}");
+            for (var i = 0; i < exercise.Sets.Count; i++)
+            {
+                var target = exercise.Sets[i]; var result = recorded.Sets.FirstOrDefault(x => x.SetId == target.Id);
+                lines.Add($"{exercise.Name} · {i + 1}: {WorkoutDocuments.FormatSetResult(target, result)}");
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(recorded.Notes)) lines.Add(recorded.Notes);
+        return string.Join("\n", lines);
+    }
+
+    void UpdateSessionSet(TrainingLog log, SetTarget target, ChangeEventArgs e, bool repetitions)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        int? reps = null; decimal? load = null;
+        if (repetitions && !string.IsNullOrWhiteSpace(value))
+        {
+            if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed is < 0 or > 1000)
+            { ShowMessage("Повторы должны быть целым числом от 0 до 1000"); return; }
+            reps = parsed;
+        }
+        else if (!repetitions && !string.IsNullOrWhiteSpace(value))
+        {
+            if (!decimal.TryParse(value.Replace(',', '.'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed) || parsed is < 0 or > 100_000)
+            { ShowMessage("Проверьте введённую нагрузку"); return; }
+            load = parsed;
+        }
+
+        var current = logs.FirstOrDefault(x => x.Id == log.Id) ?? log;
+        var document = WorkoutDocuments.ReadLog(current.Results);
+        var previous = document.Sets.FirstOrDefault(x => x.SetId == target.Id);
+        var updated = repetitions
+            ? new SetResult(target.Id, reps, previous?.Load, previous?.Completed ?? false)
+            : new SetResult(target.Id, previous?.Repetitions, load, previous?.Completed ?? false);
+        SaveSessionResults(current, document with { Sets = UpsertSet(document.Sets, updated) });
+    }
+
+    void UpdateSessionCompleted(TrainingLog log, SetTarget target, ChangeEventArgs e)
+    {
+        var current = logs.FirstOrDefault(x => x.Id == log.Id) ?? log;
+        var document = WorkoutDocuments.ReadLog(current.Results);
+        var previous = document.Sets.FirstOrDefault(x => x.SetId == target.Id);
+        var updated = new SetResult(target.Id, previous?.Repetitions, previous?.Load, e.Value is bool value && value);
+        SaveSessionResults(current, document with { Sets = UpsertSet(document.Sets, updated) });
+    }
+
+    void UpdateSessionNotes(TrainingLog log, ChangeEventArgs e)
+    {
+        var current = logs.FirstOrDefault(x => x.Id == log.Id) ?? log;
+        var document = WorkoutDocuments.ReadLog(current.Results);
+        SaveSessionResults(current, document with { Notes = e.Value?.ToString() ?? string.Empty });
+    }
+
+    static IReadOnlyList<SetResult> UpsertSet(IReadOnlyList<SetResult> sets, SetResult updated)
+    {
+        var result = sets.Where(x => x.SetId != updated.SetId).ToList();
+        result.Add(updated);
+        return result;
+    }
+
+    void SaveSessionResults(TrainingLog current, WorkoutLogDocument document)
+    {
+        Store.Save(current.Id, current with { Results = WorkoutDocuments.WriteLog(document) });
+        Refresh();
+    }
+
+    void Finish(TrainingLog log)
+    {
+        var current = Store.All<TrainingLog>().FirstOrDefault(x => x.Id == log.Id);
+        if (current is null) return;
+        var completed = current with { Finished = true };
+        var linkedPlan = current.ScheduleItemId is { } itemId
+            ? Store.All<PlanItem>().FirstOrDefault(item => item.Id == itemId)
+            : null;
+        if (linkedPlan is { Done: false }) linkedPlan = linkedPlan with { Done = true };
+        else linkedPlan = null;
+
+        OccurrenceOverride? linkedOccurrence = null;
+        if (current.ScheduleSeriesId is { } seriesId && current.ScheduleOriginalDate is { } originalDate &&
+            Store.All<Recurrence>().Any(series => series.Id == seriesId))
+        {
+            var overrideId = RecurrenceProjection.OccurrenceKey(seriesId, originalDate);
+            var previous = Store.All<OccurrenceOverride>().FirstOrDefault(item => item.Id == overrideId);
+            if (previous?.Done != true)
+                linkedOccurrence = new OccurrenceOverride(overrideId, seriesId, originalDate,
+                    previous?.MovedTo, true, previous?.Skipped ?? false);
+        }
+        Store.CompleteWorkout(completed, linkedPlan, linkedOccurrence);
+        Refresh(); ShowMessage("Тренировка сохранена в истории");
+    }
+
+    void EditResults(TrainingLog log)
+    {
+        CloseSheets(); resultLogId = log.Id; resultEditor = true;
+    }
+
+    void SaveResults()
+    {
+        if (resultLogId is not { } id) { CloseSheets(); return; }
+        CloseSheets(); ShowMessage("Результаты обновлены");
+    }
+
+    string FormatTaskTime(string value) => TimeOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+        ? parsed.ToString("HH:mm", CultureInfo.InvariantCulture)
+        : value;
+
+    string FormatMoscow(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, Moscow).ToString("d MMM · HH:mm", culture);
+
+    void CloseConfirmation()
+    {
+        confirmDeleteTask = false; confirmDeleteNote = false; confirmDeleteTrainingDay = false;
+        confirmDeleteRecurrence = false; confirmDeleteVacation = false; pendingDeleteNoteId = null; pendingVacationId = null;
+    }
+
+    void ConfirmDelete()
+    {
+        if (confirmDeleteTask) DeleteTask();
+        else if (confirmDeleteNote && pendingDeleteNoteId is { } note) { Store.Delete<NoteItem>(note); CloseConfirmation(); Refresh(); ShowMessage("Заметка удалена"); }
+        else if (confirmDeleteTrainingDay) DeleteTrainingDay();
+        else if (confirmDeleteRecurrence) DeleteRecurrence();
+        else if (confirmDeleteVacation) DeleteVacation();
+        else CloseConfirmation();
+    }
+
+    public void Dispose()
+    {
+        Reminders.StatusChanged -= OnReminderStatusChanged;
+        BackgroundSync.StatusChanged -= OnBackgroundSyncStatusChanged;
+        messageTimer?.Dispose();
+        answerSaveCancellation?.Cancel();
+        answerSaveCancellation?.Dispose();
+    }
+
+    sealed class ConflictFieldDraft
+    {
+        public string Key { get; init; } = string.Empty;
+        public string Label { get; init; } = string.Empty;
+        public string BaseText { get; init; } = string.Empty;
+        public string LocalText { get; init; } = string.Empty;
+        public string ServerText { get; init; } = string.Empty;
+        public JsonNode? LocalValue { get; init; }
+        public JsonNode? ServerValue { get; init; }
+        public string ManualValue { get; set; } = string.Empty;
+        public bool IsEditable { get; init; }
+        public bool IsLongText { get; init; }
+        public string Choice { get; set; } = "server";
+    }
+
+    void CloseSheets()
+    {
+        taskEditor = false; moveEditor = false; noteEditor = false; trainingEditor = false; workoutScheduleEditor = false; resultEditor = false;
+        recurrenceManager = false; recurrenceEditor = false; vacationManager = false; vacationFormOpen = false;
+    }
+}

@@ -1,0 +1,13 @@
+# Local-only configuration and user-specific files
+/local-private/
+*.local.md
+*.local.json
+*.local.yaml
+*.local.yml
+.env
+.env.*
+!.env.example
+
+**/bin/
+**/obj/
+.vs/
