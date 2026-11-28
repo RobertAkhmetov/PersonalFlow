@@ -8,7 +8,8 @@ copy_secret_path() {
     case "$source_path" in
         /run/secrets/*)
             destination="/run/personalflow-secrets/$(basename "$source_path")"
-            install -o "$app_uid" -g "$app_uid" -m 0400 "$source_path" "$destination"
+            install -m 0400 "$source_path" "$destination"
+            chown "$app_uid:$app_uid" "$destination"
             export "$variable=$destination"
             ;;
     esac
