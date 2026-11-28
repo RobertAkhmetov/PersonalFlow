@@ -50,7 +50,7 @@ Snapshot: 2026-11-28. This page reports what exists in the repository and what h
 - On 2026-11-28, the Identity API and Avalonia desktop projects built with .NET SDK 11.0.100 and zero warnings/errors after connecting desktop PKCE sign-in, OS-secure refresh-token storage, and manual Life/Learning synchronization. Build intermediates were redirected to `/private/tmp` because the checkout's existing desktop `obj` directory is not writable in this environment. No live server sign-in, Windows Credential Manager, or macOS Keychain round trip was run.
 - Shell syntax checks succeeded for deployment scripts.
 - Initial SQL schemas were exported from the EF Core 10 PostgreSQL models and embedded in the service assemblies.
-- The Docker daemon is not running in the local environment. Compose startup was verified on the VPS; actual restore, GHCR publishing is recorded in the release workflow, and end-to-end API/OIDC/database checks remain incomplete. HTTPS readiness does not validate client sign-in or sync.
+- The Docker daemon is not running in the local environment. Compose startup was verified on the VPS and the release workflow successfully published the API images; restore and end-to-end API/OIDC/client checks remain incomplete. HTTPS readiness does not validate client sign-in or sync.
 
 ## Still outstanding
 

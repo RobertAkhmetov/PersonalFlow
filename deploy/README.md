@@ -8,7 +8,7 @@ The initial PersonalFlow-only sizing estimate is a current Ubuntu Server LTS VPS
 
 ## Constrained profile for the existing VPS
 
-**Confirmed:** the initial deployment is being started on the existing Ubuntu 26.04 VPS with 1 vCPU, about 1 GiB RAM, and 10 GB disk (8.6 GiB filesystem, about 5.5 GiB free at inspection).
+**Confirmed:** the backend was deployed on the existing Ubuntu 26.04 VPS with 1 vCPU, about 1 GiB RAM, and 10 GB disk (8.6 GiB filesystem, about 5.5 GiB free at initial inspection).
 
 **Recommendation:** use the host-specific memory and CPU caps in `local-private/production.env` and a 512 MiB swap file. The current local profile caps steady-state containers at 768 MiB and limits PostgreSQL to 20 connections with 64 MiB shared buffers. Keep an eye on memory pressure, swap use, and free disk after deployment. This profile trades throughput and headroom for running the requested first-owner stack on the existing VPS; the 2 vCPU / 4 GB / 40 GB baseline remains the recommended production size.
 
