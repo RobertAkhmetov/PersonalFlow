@@ -19,7 +19,11 @@ trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$ROOT/deploy/compose.yaml")
 "${COMPOSE[@]}" exec -T postgres sh -c 'export PGPASSWORD="$(cat /run/secrets/postgres-admin-password)"; exec pg_dumpall -h 127.0.0.1 -U personalflow_admin --globals-only' | age -R "$RECIPIENTS" -o "$WORK/globals.sql.age" -
-"${COMPOSE[@]}" exec -T identity tar -C /var/lib/personalflow/data-protection -cf - . | age -R "$RECIPIENTS" -o "$WORK/identity-data-protection.tar.age" -
+IDENTITY_VOLUME="$("${COMPOSE[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["volumes"]["identity_data_protection"]["name"])')"
+docker run --rm --network none --read-only \
+    --mount "type=volume,src=$IDENTITY_VOLUME,dst=/source,readonly" \
+    --entrypoint tar postgres:18-alpine -C /source -cf - . \
+    | age -R "$RECIPIENTS" -o "$WORK/identity-data-protection.tar.age" -
 for db in life learning identity; do
     "${COMPOSE[@]}" exec -T postgres sh -c "export PGPASSWORD=\"\$(cat /run/secrets/postgres-admin-password)\"; exec pg_dump -h 127.0.0.1 -U personalflow_admin --format=custom --dbname=$db" | age -R "$RECIPIENTS" -o "$WORK/$db.dump.age" -
 done
