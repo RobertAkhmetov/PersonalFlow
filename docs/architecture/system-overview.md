@@ -1,6 +1,6 @@
 # System overview
 
-**Status:** implemented backend topology; production deployment and client integration remain unverified. See [implementation status](../implementation-status.md).
+**Status:** implemented backend topology; deployed to an existing VPS with HTTPS readiness verified. Owner provisioning, durable scheduled backups, restore rehearsal, and client integration remain unverified. See [implementation status](../implementation-status.md).
 
 ## Topology
 

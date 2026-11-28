@@ -19,6 +19,8 @@ set -a
 . "$ENV_FILE"
 set +a
 for url in "https://$IDENTITY_DOMAIN/.well-known/openid-configuration" "https://$APP_DOMAIN/life/health/ready" "https://$APP_DOMAIN/learning/health/ready"; do
-    curl --fail --silent --show-error --retry 20 --retry-connrefused --retry-delay 3 --max-time 8 "$url" >/dev/null
+    # Caddy reports healthy before its first ACME issuance necessarily completes.
+    # Retry transient TLS alerts as well as refused connections during that window.
+    curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 3 --max-time 8 "$url" >/dev/null
 done
 echo "PersonalFlow APIs are healthy. Before provisioning the owner, configure and verify the encrypted off-host backup remote."

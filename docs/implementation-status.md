@@ -13,6 +13,8 @@ Snapshot: 2026-11-28. This page reports what exists in the repository and what h
 - Compose networking separates the internal PostgreSQL data network, API/proxy network, and shared public-edge network. Caddy routes other HTTP apps through private site snippets; preflight rejects Docker subnet and host-port collisions. Real co-hosting has not yet been exercised on a VPS.
 - Secret preparation, deployment preflight, immutable-image deploy, lesson-pack publication, encrypted off-host backup, daily systemd timer, and database/key-ring restore with sync-epoch rotation.
 - GitHub Actions workflow builds the solution and is configured to publish multi-architecture API images tagged by commit SHA.
+- On 2026-11-28, deployed release `7064b783e4b216f8fe87a5909a74401d2ee1a503` to the existing 1 vCPU / about 1 GiB RAM VPS. PostgreSQL, all three APIs, and Caddy are running; all three versioned SQL migrations exited successfully. Identity discovery and Life/Learning readiness returned HTTP 200 over publicly trusted HTTPS.
+- The pre-migration database and Identity key-ring snapshot was encrypted with age, transferred to the recovery Mac, and verified. This is a one-time snapshot over a temporary relay; no durable remote or daily backup timer is configured. Owner provisioning and storing user data remain gated until an encrypted off-host backup destination is configured.
 
 ## Client progress since the backend snapshot
 
@@ -44,15 +46,15 @@ Snapshot: 2026-11-28. This page reports what exists in the repository and what h
 - After adding mobile edit-versus-delete resolution and the append-only Life/Learning SQL migrations, the full solution and Android/iOS Simulator Debug builds succeeded on .NET SDK 11.0.100 with zero warnings/errors. The updated app was installed and launched on the booted iPhone 17 Simulator (iOS 26.5). Conflict creation/resolution against a live database and VPS remains unverified.
 - On 2026-11-28, after adding mobile sync-epoch recovery and restored-snapshot reconciliation, `PersonalFlow.slnx` and Android/iOS Simulator Debug builds succeeded on .NET SDK 11.0.100 with zero warnings/errors. The app was installed and launched on iPhone 17 Simulator. Recovery against a restored PostgreSQL database and VPS remains unverified; executable checks were not run in this pass.
 - On 2026-11-28, after adding local schema snapshots and a pre-release backup guard, the full solution, Android Debug, and iOS Simulator Debug builds succeeded on .NET SDK 11.0.100 with zero warnings/errors. The updated app was installed and launched on iPhone 17 Simulator. No automated checks were run; the local migration recovery path and server backup/restore still need rehearsal before production use.
-- On 2026-11-28, Compose configuration validation confirmed separate PersonalFlow ingress/data/edge networks, no published PostgreSQL host port, and only Caddy publishing 80/443. Deployment scripts pass shell syntax checks. The Docker daemon is unavailable, so Caddy snippet validation and multi-stack startup have not been run.
+- On 2026-11-28, Compose configuration validation confirmed separate PersonalFlow ingress/data/edge networks, no published PostgreSQL host port, and only Caddy publishing 80/443. The deployment on the existing VPS confirmed container startup and these network boundaries. Co-hosting with another application and restore remain unverified.
 - On 2026-11-28, the Identity API and Avalonia desktop projects built with .NET SDK 11.0.100 and zero warnings/errors after connecting desktop PKCE sign-in, OS-secure refresh-token storage, and manual Life/Learning synchronization. Build intermediates were redirected to `/private/tmp` because the checkout's existing desktop `obj` directory is not writable in this environment. No live server sign-in, Windows Credential Manager, or macOS Keychain round trip was run.
 - Shell syntax checks succeeded for deployment scripts.
 - Initial SQL schemas were exported from the EF Core 10 PostgreSQL models and embedded in the service assemblies.
-- The Docker daemon is not running in the local environment. Compose startup, image builds, actual backup/restore, GHCR publishing, and a VPS deployment have not been verified here. No end-to-end API/OIDC/database checks have been run.
+- The Docker daemon is not running in the local environment. Compose startup was verified on the VPS; actual restore, GHCR publishing is recorded in the release workflow, and end-to-end API/OIDC/database checks remain incomplete. HTTPS readiness does not validate client sign-in or sync.
 
 ## Still outstanding
 
-- Deploy to a real Ubuntu VPS with real DNS, GHCR access, and an off-host backup destination; validate first boot, HTTPS renewal, owner bootstrap, backup upload, and isolated restore.
+- Configure a durable encrypted off-host backup destination and daily timer; rehearse an isolated restore before provisioning the owner or storing user data. The current HTTPS certificates were issued successfully; renewal is not yet observed.
 - Add and verify the next versioned SQL migrations as schema changes are made; rehearse upgrade and rollback/recovery procedures.
 - Plan and validate token-signing and data-protection certificate rotation before the generated five-year certificate expires.
 - Add desktop conflict resolution and sync-epoch recovery while retaining pending local work.
@@ -64,7 +66,7 @@ Snapshot: 2026-11-28. This page reports what exists in the repository and what h
 
 ## Deployment boundary
 
-The backend is prepared for deployment, but it has not been proven in a production environment. Both clients include API configuration and manual sync paths; a VPS is still required to validate sign-in and cross-device behavior. Desktop conflict handling and epoch recovery are not implemented yet. See the [VPS deployment runbook](../deploy/README.md).
+The backend is running on the existing VPS and its HTTPS readiness endpoints have been verified. The owner account has not been provisioned because a durable daily backup destination and restore rehearsal are still outstanding. Both clients include API configuration and manual sync paths; live sign-in and cross-device behavior remain unverified. Desktop conflict handling and epoch recovery are not implemented yet. See the [VPS deployment runbook](../deploy/README.md).
 
 - Added an offline Learning progress transport keyed by lesson and content version, with a separate queue and cursor, HTTPS enforcement, immutable retries, conflict isolation, and epoch retention. MAUI wires it to authentication, manual sync, and launch/resume sync attempts; Avalonia wires it to authentication and manual sync.
 - Existing version 1 lesson answers migrate into the Learning queue while their unsupported old Life outbox entries are removed after the new representation is committed.

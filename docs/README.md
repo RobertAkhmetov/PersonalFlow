@@ -17,7 +17,7 @@ This folder contains the canonical product and engineering specifications for Pe
 
 ## Current delivery status
 
-Backend source and deployment assets are implemented and build-verified, but have not been deployed to a VPS. Avalonia and MAUI have authenticated Life/Learning sync paths; desktop conflict resolution and epoch recovery, plus live validation against a deployed server, remain outstanding. See [implementation status](implementation-status.md).
+Backend source and deployment assets are implemented and build-verified, and the backend is running on an existing VPS. HTTPS readiness is verified. Owner provisioning, durable scheduled backups, restore rehearsal, and live client sign-in/sync remain outstanding. Avalonia and MAUI have authenticated Life/Learning sync paths; desktop conflict resolution and epoch recovery also remain outstanding. See [implementation status](implementation-status.md).
 
 ## Status labels
 

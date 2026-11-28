@@ -123,4 +123,8 @@ The generated token-signing PFX is valid for five years. There is no automated c
 
 ## Current deployment boundary
 
-This repository now contains the API images, migrations, Compose stack, HTTPS routing, secret preparation, owner bootstrap, lesson publication, encrypted backup/restore, and health checks. The deployment has not been run against a real VPS, DNS zone, GHCR package permissions, or chosen object-storage provider. Docker is not running in the local Mac environment used for this implementation, so container startup, multi-stack co-hosting, and restore remain deployment gates. Desktop/mobile authentication and API synchronization are implemented in the clients but have not been validated against the deployed services.
+The backend is running on the existing 1 vCPU / about 1 GiB RAM Ubuntu VPS. PostgreSQL, Identity, Life, Learning, and Caddy are healthy; versioned migrations completed, and all three public HTTPS readiness endpoints returned HTTP 200 with valid TLS certificates. The configured hostnames use nip.io because no owned DNS zone was provided.
+
+**Confirmed data safeguard:** a pre-migration database and Identity key-ring snapshot was encrypted with age, transferred to the recovery Mac over a temporary SSH relay, and verified. That relay has been removed after deployment. No durable external backup provider or daily timer is configured, so do not provision the owner or store user data until an encrypted off-host destination is available and verified. The restore path has not been rehearsed.
+
+Desktop/mobile authentication and API synchronization are implemented in the clients but have not been validated against the deployed services. HTTPS certificate renewal, co-hosting with another application, and isolated restore also remain unverified. The deployment uses a constrained host profile; see above for memory and CPU limits.
