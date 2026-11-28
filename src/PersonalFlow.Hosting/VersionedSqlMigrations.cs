@@ -44,7 +44,7 @@ public static class VersionedSqlMigrations
             await db.Database.ExecuteSqlRawAsync(migration.Sql, cancellationToken);
             await db.Database.ExecuteSqlRawAsync(
                 $"INSERT INTO \"{HistoryTable}\" (\"Version\", \"Checksum\") VALUES ({{0}}, {{1}})",
-                new object?[] { migration.Id, checksum },
+                new object[] { migration.Id, checksum },
                 cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
